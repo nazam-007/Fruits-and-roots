@@ -745,12 +745,38 @@ router.patch("/menu/:productId/status", async (req, res) => {
     return;
   }
   try {
+    if (parsed.data.availabilityStatus === "AVAILABLE") {
+      const regularVariant = await db.query(
+        `SELECT 1
+         FROM product_variants
+         WHERE product_id = $1 AND size = 'Regular' AND price > 0`,
+        [productId.data],
+      );
+      if (!regularVariant.rowCount) {
+        const product = await db.query(
+          "SELECT 1 FROM products WHERE id = $1",
+          [productId.data],
+        );
+        if (!product.rowCount) {
+          res.status(404).json({ message: "Menu item not found." });
+          return;
+        }
+        res.status(409).json({
+          message: "Add a valid Regular price in Edit before marking this product available.",
+        });
+        return;
+      }
+    }
     const result = await db.query(
       `UPDATE products
-       SET availability_status = $2, available = ($2 = 'AVAILABLE')
+       SET availability_status = $2, available = $3
        WHERE id = $1
        RETURNING id`,
-      [productId.data, parsed.data.availabilityStatus],
+      [
+        productId.data,
+        parsed.data.availabilityStatus,
+        parsed.data.availabilityStatus === "AVAILABLE",
+      ],
     );
     if (!result.rowCount) {
       res.status(404).json({ message: "Menu item not found." });
@@ -758,10 +784,32 @@ router.patch("/menu/:productId/status", async (req, res) => {
     }
     res.json(await getAdminMenuProduct(productId.data));
   } catch (error) {
+    const databaseError = error as {
+      code?: string;
+      message?: string;
+      detail?: string;
+      constraint?: string;
+    };
     console.error("Admin menu availability update failed", {
-      code: (error as { code?: string }).code,
+      endpoint: "PATCH /api/admin/menu/:productId/status",
+      code: databaseError.code,
+      message: databaseError.message,
+      ...(process.env.NODE_ENV === "development"
+        ? {
+            detail: databaseError.detail,
+            constraint: databaseError.constraint,
+          }
+        : {}),
     });
-    res.status(500).json({ message: "Unable to update availability." });
+    res.status(500).json({
+      message:
+        process.env.NODE_ENV === "development"
+          ? `Unable to update availability (database error ${databaseError.code ?? "unknown"}).`
+          : "Unable to update availability.",
+      ...(process.env.NODE_ENV === "development"
+        ? { code: databaseError.code }
+        : {}),
+    });
   }
 });
 

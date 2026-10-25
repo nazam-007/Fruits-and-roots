@@ -12,6 +12,12 @@ export default function ProductCard({ item }: Props) {
   const startingPrice = item.variants.length
     ? Math.min(...item.variants.map((v) => v.price))
     : null;
+  const availabilityLabel =
+    item.availabilityStatus === "SOLD_OUT"
+      ? "Sold Out"
+      : item.availabilityStatus === "COMING_SOON"
+        ? "Coming Soon"
+        : "Price Not Set";
   return (
     <article className="group h-full overflow-hidden rounded-2xl border border-[#e7e4d8] bg-white shadow-[0_8px_26px_-20px_rgba(30,51,35,0.55)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_18px_38px_-20px_rgba(30,51,35,0.35)] sm:rounded-3xl">
       <div className="relative aspect-[4/3] overflow-hidden bg-[#e9eddf]">
@@ -30,7 +36,7 @@ export default function ProductCard({ item }: Props) {
           )}
           {!item.available && (
             <span className="rounded-full bg-[#253b2a]/90 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white shadow-sm sm:text-[11px]">
-              {item.availabilityStatus === "SOLD_OUT" ? "Sold Out" : "Coming Soon"}
+              {availabilityLabel}
             </span>
           )}
         </div>
@@ -41,18 +47,22 @@ export default function ProductCard({ item }: Props) {
           <h3 className="truncate font-semibold text-[#253b2a] sm:text-lg">
             {item.name}
           </h3>
-          <p className="mt-1 text-xs text-[#7a8074] sm:text-sm">
-            {startingPrice !== null
-              ? (
-                  <>
-                    From{" "}
-                    <span className="font-semibold text-[#31573a]">
-                      ₹{startingPrice}
-                    </span>
-                  </>
-                )
-              : "Coming Soon"}
-          </p>
+          {item.availabilityStatus !== "SOLD_OUT" && (
+            <p className="mt-1 text-xs text-[#7a8074] sm:text-sm">
+              {startingPrice !== null
+                ? (
+                    <>
+                      From{" "}
+                      <span className="font-semibold text-[#31573a]">
+                        ₹{startingPrice}
+                      </span>
+                    </>
+                  )
+                : item.availabilityStatus === "COMING_SOON"
+                  ? "Coming Soon"
+                  : "Price not set"}
+            </p>
+          )}
         </div>
 
         <Link
