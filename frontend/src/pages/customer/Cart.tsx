@@ -5,19 +5,55 @@ import {
   Clock3,
   Minus,
   Plus,
+  RefreshCw,
   ShoppingBag,
   Trash2,
 } from "lucide-react";
 import { useCart } from "../../context/CartContext";
-import { menuItems } from "../../data/menu";
-import { getMenuItemImage } from "../../data/menuImages";
+import { useMenu } from "../../context/MenuContext";
+import MenuItemImage from "../../components/customer/MenuItemImage";
 
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
 
 export default function Cart() {
   const navigate = useNavigate();
-  const { cart, cartTotal, cartCount, updateQuantity, removeFromCart } =
+  const { cart, cartCount, updateQuantity, removeFromCart } =
     useCart();
+  const {
+    menuItems,
+    loading: menuLoading,
+    error: menuError,
+    refreshMenu,
+  } = useMenu();
+  const cartEntries = cart.map((item) => {
+    const product = menuItems.find((menuItem) => menuItem.id === item.id);
+    const variant = product?.variants.find((menuVariant) => menuVariant.size === item.size);
+    const available = product?.available === true && Boolean(variant);
+    return {
+      ...item,
+      product,
+      name: product?.name ?? item.name,
+      price: variant?.price ?? item.price,
+      available,
+      statusLabel: menuLoading || menuError
+        ? null
+        : !product
+        ? "No longer on the menu"
+        : product.availabilityStatus === "SOLD_OUT"
+          ? "Sold out"
+          : product.availabilityStatus === "COMING_SOON" || !product.available
+            ? "Coming soon"
+            : variant
+              ? null
+              : "This size is no longer offered",
+    };
+  });
+  const currentCartTotal = cartEntries.reduce(
+    (total, item) => total + item.price * item.quantity,
+    0,
+  );
+  const cartItemsAreAvailable =
+    !menuLoading && !menuError && cartEntries.every((item) => item.available);
 
   if (cart.length === 0) {
     return (
@@ -77,11 +113,7 @@ export default function Cart() {
           aria-label="Cart items"
           className="min-w-0 space-y-3 sm:space-y-4"
         >
-          {cart.map((item) => {
-            const menuItem = menuItems.find(
-              (product) => product.id === item.id,
-            );
-            const image = menuItem ? getMenuItemImage(menuItem) : undefined;
+          {cartEntries.map((item) => {
             const quantityReachedLimit = item.quantity >= 99;
 
             return (
@@ -92,25 +124,18 @@ export default function Cart() {
                 <Link
                   to={`/product/${item.id}`}
                   aria-label={`View ${item.name}`}
-                  className="h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-[#e9eddf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] sm:h-28 sm:w-28 sm:rounded-2xl"
+                  className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-[#e9eddf] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] sm:h-28 sm:w-28 sm:rounded-2xl"
                 >
-                  {image ? (
-                    <img
-                      src={image}
-                      alt={item.name}
-                      width="450"
-                      height="450"
-                      loading="lazy"
-                      decoding="async"
-                      className="h-full w-full object-cover transition duration-300 hover:scale-105"
+                  {item.product ? (
+                    <MenuItemImage
+                      item={item.product}
+                      width={450}
+                      height={450}
+                      imageClassName="absolute inset-0 h-full w-full object-cover transition duration-300 hover:scale-105"
+                      fallbackClassName="absolute inset-0 flex items-center justify-center text-4xl"
                     />
                   ) : (
-                    <span
-                      aria-hidden="true"
-                      className="flex h-full w-full items-center justify-center text-4xl"
-                    >
-                      🥤
-                    </span>
+                    <span aria-hidden="true" className="absolute inset-0 flex items-center justify-center text-4xl">🥤</span>
                   )}
                 </Link>
 
@@ -123,6 +148,11 @@ export default function Cart() {
                       <p className="mt-1 text-xs font-medium text-[#7a8074] sm:text-sm">
                         {item.size} size
                       </p>
+                        {item.statusLabel && (
+                          <p className="mt-1 text-xs font-semibold text-[#984734]" role="alert">
+                            {item.statusLabel}
+                          </p>
+                        )}
                       <p className="mt-1 text-xs text-[#73796d] sm:text-sm">
                         {formatPrice(item.price)} each
                       </p>
@@ -205,7 +235,7 @@ export default function Cart() {
             <div className="flex justify-between gap-3 text-[#73796d]">
               <span>Items ({cartCount})</span>
               <span className="font-medium tabular-nums text-[#253b2a]">
-                {formatPrice(cartTotal)}
+                {formatPrice(currentCartTotal)}
               </span>
             </div>
             <div className="flex items-start gap-2 text-xs leading-5 text-[#7a8074]">
@@ -226,14 +256,34 @@ export default function Cart() {
               aria-live="polite"
               className="text-2xl font-bold tabular-nums text-[#253b2a]"
             >
-              {formatPrice(cartTotal)}
+              {formatPrice(currentCartTotal)}
             </output>
           </div>
+          {menuLoading ? (
+            <p role="status" className="mt-3 text-center text-xs text-[#73796d]">
+              Checking current menu prices and availability…
+            </p>
+          ) : menuError ? (
+            <div role="alert" className="mt-3 rounded-xl bg-[#fff2ee] p-3 text-sm text-[#984734]">
+              {menuError}
+              <button type="button" onClick={() => void refreshMenu()} className="mt-2 inline-flex min-h-9 items-center gap-2 font-semibold underline">
+                <RefreshCw size={14} /> Try again
+              </button>
+            </div>
+          ) : !cartItemsAreAvailable ? (
+            <div className="mt-3 rounded-xl bg-[#fff2ee] p-3 text-sm text-[#984734]">
+              Remove unavailable items or choose another size before checkout.
+              <button type="button" onClick={() => void refreshMenu()} className="mt-2 inline-flex min-h-9 items-center gap-2 font-semibold underline">
+                <RefreshCw size={14} /> Refresh menu
+              </button>
+            </div>
+          ) : null}
 
           <button
             type="button"
             onClick={() => navigate("/checkout")}
-            className="mt-5 hidden min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#31573a] px-5 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-[#25472e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2 sm:inline-flex"
+            disabled={menuLoading || !cartItemsAreAvailable}
+            className="mt-5 hidden min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#31573a] px-5 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-[#25472e] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2 sm:inline-flex"
           >
             Continue to checkout
             <ArrowRight size={17} aria-hidden="true" />
@@ -251,13 +301,14 @@ export default function Cart() {
         <button
           type="button"
           onClick={() => navigate("/checkout")}
-          className="mx-auto flex min-h-12 w-full max-w-lg items-center justify-between gap-3 rounded-full bg-[#31573a] px-5 font-semibold text-white transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2"
+          disabled={menuLoading || !cartItemsAreAvailable}
+          className="mx-auto flex min-h-12 w-full max-w-lg items-center justify-between gap-3 rounded-full bg-[#31573a] px-5 font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2"
         >
           <span className="inline-flex items-center gap-2">
             Continue to checkout
             <ArrowRight size={17} aria-hidden="true" />
           </span>
-          <span className="tabular-nums">{formatPrice(cartTotal)}</span>
+          <span className="tabular-nums">{formatPrice(currentCartTotal)}</span>
         </button>
       </div>
     </div>

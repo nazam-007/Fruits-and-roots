@@ -88,7 +88,14 @@ Apply migrations only if they have not already been applied to that database. Us
 
 ### Optional product image uploads
 
-Create a **public** Supabase Storage bucket named `menu-images` (or set `MENU_STORAGE_BUCKET` to another bucket). Configure the bucket for a maximum 4 MB file size and allow JPEG, PNG, and WebP images. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` in the backend environment only. If storage is not configured, product editing and availability management still work, but image uploads return a configuration error.
+To enable image uploads:
+
+1. In the Supabase Dashboard, open **Storage** and create a **public** bucket named `menu-images` (or set `MENU_STORAGE_BUCKET` to a different bucket name).
+2. Set the bucket's file size limit to 4 MB and allowed MIME types to `image/jpeg`, `image/png`, and `image/webp`.
+3. In `backend\.env`, set `SUPABASE_URL` to the Project URL from **Project Settings → API**, and set `SUPABASE_SERVICE_ROLE_KEY` to the server-side service-role key from the same settings page. Keep this key only in the backend environment; never use it in frontend configuration or commit it.
+4. Restart the backend after changing its environment.
+
+If storage is not configured, product editing and availability management still work, but image uploads return a configuration error that identifies which backend setting is missing.
 
 ## Set up the frontend
 
@@ -175,4 +182,3 @@ The backend `npm test` script is currently a placeholder; there is no configured
 - Configure CORS with the exact deployed frontend origin(s).
 - Back up the database before applying schema migrations.
 - Manual UPI payment claims require staff to independently verify receipt before marking an order paid.
-

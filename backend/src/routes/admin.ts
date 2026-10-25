@@ -542,7 +542,7 @@ const menuProductSchema = z.object({
   largePrice: z.number().int().positive().max(1_000_000).nullable(),
 }).strict();
 
-const productIdSchema = z.string().min(1).max(120).regex(/^[A-Za-z0-9_-]+$/);
+const productIdSchema = z.string().min(1).max(120).regex(/^[A-Za-z0-9_&-]+$/);
 
 async function getAdminMenuProduct(productId: string) {
   const result = await db.query(
@@ -812,11 +812,28 @@ router.post("/menu/:productId/image", async (req, res) => {
     res.status(400).json({ message: "Choose an image no larger than 4 MB." });
     return;
   }
+  const hasValidSignature = match[1] === "image/jpeg"
+    ? image[0] === 0xff && image[1] === 0xd8 && image[2] === 0xff
+    : match[1] === "image/png"
+      ? image.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      : image.toString("ascii", 0, 4) === "RIFF" &&
+        image.toString("ascii", 8, 12) === "WEBP";
+  if (!hasValidSignature) {
+    res.status(400).json({ message: "The selected file is not a valid image of that type." });
+    return;
+  }
   const storageUrl = process.env.SUPABASE_URL;
   const storageKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const bucket = process.env.MENU_STORAGE_BUCKET;
+  const missingSettings = [
+    !storageUrl ? "SUPABASE_URL" : null,
+    !storageKey ? "SUPABASE_SERVICE_ROLE_KEY" : null,
+    !bucket ? "MENU_STORAGE_BUCKET" : null,
+  ].filter((setting): setting is string => setting !== null);
   if (!storageUrl || !storageKey || !bucket) {
-    res.status(503).json({ message: "Image uploads are not configured. Contact the application administrator." });
+    res.status(503).json({
+      message: `Image uploads need backend configuration: ${missingSettings.join(", ")}. Configure these in backend/.env and restart the backend.`,
+    });
     return;
   }
   let baseUrl: URL;
