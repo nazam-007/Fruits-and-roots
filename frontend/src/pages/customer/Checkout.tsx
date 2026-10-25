@@ -45,9 +45,14 @@ async function getIdempotencyKey(fingerprint: string) {
 
 export default function Checkout() {
   const navigate = useNavigate();
-  const { cart, cartCount, cartTotal } = useCart();
+  const { cart, cartCount } = useCart();
   const { checkoutDetails, saveCheckoutDetails } = useCheckout();
-  const { menuItems, loading: menuLoading } = useMenu();
+  const {
+    menuItems,
+    loading: menuLoading,
+    error: menuError,
+    refreshMenu,
+  } = useMenu();
   const [customerName, setCustomerName] = useState(
     checkoutDetails?.customerName ?? "",
   );
@@ -57,16 +62,22 @@ export default function Checkout() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  const checkoutItems = cart.map((item) => {
+    const product = menuItems.find((menuItem) => menuItem.id === item.id);
+    const variant = product?.variants.find((menuVariant) => menuVariant.size === item.size);
+    return {
+      ...item,
+      name: product?.name ?? item.name,
+      price: variant?.price ?? item.price,
+      available: product?.available === true && Boolean(variant),
+    };
+  });
   const cartItemsAreAvailable =
-    !menuLoading &&
-    cart.length > 0 &&
-    cart.every(({ id, size }) => {
-      const product = menuItems.find((item) => item.id === id);
-      return (
-        product?.available === true &&
-        product.variants.some((variant) => variant.size === size)
-      );
-    });
+    !menuLoading && !menuError && cart.length > 0 && checkoutItems.every((item) => item.available);
+  const currentCartTotal = checkoutItems.reduce(
+    (total, item) => total + item.price * item.quantity,
+    0,
+  );
 
   useEffect(() => {
     if (cart.length === 0) navigate("/cart", { replace: true });
@@ -239,7 +250,15 @@ export default function Checkout() {
               Checking that your items are available...
             </p>
           )}
-          {!menuLoading && cart.length > 0 && !cartItemsAreAvailable && (
+          {!menuLoading && menuError && (
+            <div role="alert" className="mt-3 text-sm text-[#984734]">
+              {menuError}{" "}
+              <button type="button" onClick={() => void refreshMenu()} className="font-semibold underline">
+                Try again
+              </button>
+            </div>
+          )}
+          {!menuLoading && !menuError && cart.length > 0 && !cartItemsAreAvailable && (
             <p role="alert" className="mt-3 text-sm text-[#984734]">
               One or more cart items are unavailable. Please review your cart.
             </p>
@@ -260,7 +279,7 @@ export default function Checkout() {
             {cartCount} {cartCount === 1 ? "item" : "items"}
           </p>
           <ul className="mt-5 max-h-64 space-y-3 overflow-y-auto border-b border-[#eeece4] pb-5">
-            {cart.map((item) => (
+            {checkoutItems.map((item) => (
               <li
                 key={`${item.id}-${item.size}`}
                 className="flex items-start justify-between gap-3 text-sm"
@@ -282,7 +301,7 @@ export default function Checkout() {
           <div className="mt-4 flex items-center justify-between gap-3">
             <span className="font-semibold text-[#253b2a]">Total</span>
             <span className="text-2xl font-bold tabular-nums text-[#253b2a]">
-              {formatPrice(cartTotal)}
+              {formatPrice(currentCartTotal)}
             </span>
           </div>
           <div className="mt-4 flex items-start gap-2 rounded-xl bg-[#f5f5ef] p-3 text-xs leading-5 text-[#73796d]">
@@ -311,7 +330,7 @@ export default function Checkout() {
             {submitting ? "Creating your order..." : "Continue to Payment"}
             {!submitting && <ArrowRight size={17} aria-hidden="true" />}
           </span>
-          <span className="tabular-nums">{formatPrice(cartTotal)}</span>
+          <span className="tabular-nums">{formatPrice(currentCartTotal)}</span>
         </button>
       </div>
     </div>

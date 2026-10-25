@@ -199,7 +199,9 @@ export default function MenuManagement() {
         await updateAdminMenuProduct(editing.id, input);
         productId = editing.id;
       } else {
-        productId = (await createAdminMenuProduct(input)).id;
+        const createdProduct = await createAdminMenuProduct(input);
+        productId = createdProduct.id;
+        setEditing(createdProduct);
       }
       productSaved = true;
       if (imageFile) {
@@ -395,8 +397,10 @@ export default function MenuManagement() {
                 <input required maxLength={120} value={form.name} onChange={(event) => updateForm("name", event.target.value)} className="min-h-11 w-full rounded-lg border border-gray-300 px-3" />
               </label>
               <label className="space-y-1 text-sm font-medium text-gray-700">Category *
-                <input required maxLength={80} list="menu-category-options" value={form.category} onChange={(event) => updateForm("category", event.target.value)} className="min-h-11 w-full rounded-lg border border-gray-300 px-3" />
-                <datalist id="menu-category-options">{categories.map((category) => <option key={category} value={category} />)}</datalist>
+                <select required value={form.category} onChange={(event) => updateForm("category", event.target.value)} className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3">
+                  <option value="" disabled>Select a category</option>
+                  {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+                </select>
               </label>
               <label className="space-y-1 text-sm font-medium text-gray-700">Availability
                 <select value={form.availabilityStatus} onChange={(event) => updateForm("availabilityStatus", event.target.value as Status)} className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3">

@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { categories, getCategorySlug } from "../../data/menu";
-import { getMenuItemImage } from "../../data/menuImages";
+import MenuItemImage from "../../components/customer/MenuItemImage";
 import { useMenu } from "../../context/MenuContext";
 
 const categoryDetails: Record<
@@ -26,7 +26,7 @@ const categoryDetails: Record<
   Fruitopia: {
     description: "Fruit bowls & creamy delights",
     image:
-      "https://images.unsplash.com/photo-1511690743698-d9d85f2fbf38?auto=format&fit=crop&w=1000&q=85",
+      "https://images.unsplash.com/photo-1490474418585-ba9bad8fd0ea?auto=format&fit=crop&w=1000&q=85",
     accent: "from-[#173923]/5 via-[#173923]/20 to-[#173923]/90",
   },
   "Guilty Pleasures": {
@@ -252,7 +252,6 @@ export default function Home() {
               const startingPrice = item.variants.length
                 ? Math.min(...item.variants.map((variant) => variant.price))
                 : null;
-
               return (
                 <Link
                   key={item.id}
@@ -261,14 +260,12 @@ export default function Home() {
                   className="group overflow-hidden rounded-2xl border border-[#e7e4d8] bg-white shadow-[0_8px_26px_-20px_rgba(30,51,35,0.55)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_18px_38px_-20px_rgba(30,51,35,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-4 sm:rounded-3xl"
                 >
                   <div className="relative aspect-[4/3] overflow-hidden bg-[#e8eddf]">
-                    <img
-                      src={getMenuItemImage(item)}
-                      alt={item.name}
-                      width="900"
-                      height="675"
-                      loading="lazy"
-                      decoding="async"
-                      className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                    <MenuItemImage
+                      item={item}
+                      width={900}
+                      height={675}
+                      imageClassName="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                      fallbackClassName="absolute inset-0 flex items-center justify-center text-5xl text-[#31573a]"
                     />
                     <span className="absolute left-3 top-3 rounded-full bg-[#fff7e9]/95 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#8d562e] shadow-sm sm:text-xs">
                       House favorite

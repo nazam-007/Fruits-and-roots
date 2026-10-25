@@ -5,7 +5,7 @@ import { ArrowLeft, ShoppingCart } from "lucide-react";
 
 import { useMenu } from "../../context/MenuContext";
 import { useCart } from "../../context/CartContext";
-import type { MenuItem } from "../../data/menu";
+import MenuItemImage from "../../components/customer/MenuItemImage";
 
 type Size = "Regular" | "Large";
 
@@ -97,18 +97,12 @@ export default function ProductDetails() {
       </Link>
 
       <div className="grid gap-8 md:grid-cols-2">
-        <div className="flex aspect-square items-center justify-center overflow-hidden rounded-3xl bg-[#E8EDDF]">
-          {product.image ? (
-            <img
-              src={product.image}
-              alt={product.name}
-              className="h-full w-full object-cover"
-            />
-          ) : (
-            <span className="text-8xl" aria-hidden="true">
-              {getCategoryEmoji(product)}
-            </span>
-          )}
+        <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-3xl bg-[#E8EDDF]">
+          <MenuItemImage
+            item={product}
+            imageClassName="absolute inset-0 h-full w-full object-cover"
+            fallbackClassName="absolute inset-0 flex items-center justify-center text-8xl"
+          />
         </div>
 
         <div className="flex flex-col justify-center">
@@ -208,17 +202,4 @@ export default function ProductDetails() {
       </div>
     </div>
   );
-}
-
-function getCategoryEmoji(product: MenuItem) {
-  switch (product.category) {
-    case "Fruitopia":
-      return "🍓";
-    case "Guilty Pleasures":
-      return "🧇";
-    case "Bread & Bite":
-      return "🥪";
-    default:
-      return "🥤";
-  }
 }
