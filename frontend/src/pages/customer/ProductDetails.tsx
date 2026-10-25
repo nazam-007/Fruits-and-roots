@@ -120,7 +120,11 @@ export default function ProductDetails() {
 
           {!isAvailable ? (
             <p className="mt-8 font-semibold text-orange-700">
-              {product.availabilityStatus === "SOLD_OUT" ? "Sold Out" : "Coming Soon"}
+              {product.availabilityStatus === "SOLD_OUT"
+                ? "Sold Out"
+                : product.availabilityStatus === "COMING_SOON"
+                  ? "Coming Soon"
+                  : "Price not set yet"}
             </p>
           ) : (
             <>
