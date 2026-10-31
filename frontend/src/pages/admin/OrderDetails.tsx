@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import {
@@ -26,34 +26,74 @@ export default function AdminOrderDetails() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const requestInFlightRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
-  const refresh = useCallback(async (showLoading = false) => {
+  const refresh = useCallback(async (showLoading = false, force = false) => {
     if (!orderId) {
       setError("Invalid order ID.");
       setLoading(false);
       return;
     }
+    if (requestInFlightRef.current) {
+      if (!force) return;
+      requestIdRef.current += 1;
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      requestInFlightRef.current = false;
+    }
+    if (document.visibilityState === "hidden") return;
+
+    const requestId = ++requestIdRef.current;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    requestInFlightRef.current = true;
     if (showLoading) setLoading(true);
     try {
-      setOrder(await fetchAdminOrder(orderId));
+      const latestOrder = await fetchAdminOrder(orderId, controller.signal);
+      if (requestId !== requestIdRef.current) return;
+      setOrder(latestOrder);
       setError(null);
     } catch (requestError) {
+      if (controller.signal.aborted || requestId !== requestIdRef.current) {
+        return;
+      }
       setError(
         requestError instanceof Error
           ? requestError.message
           : "Unable to load order details.",
       );
     } finally {
+      if (requestId === requestIdRef.current) {
+      controllerRef.current = null;
+      requestInFlightRef.current = false;
       setLoading(false);
+      }
     }
   }, [orderId]);
 
   useEffect(() => {
     const initialTimeout = window.setTimeout(() => void refresh(true), 0);
-    const intervalId = window.setInterval(() => void refresh(), 7000);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+      void refresh();
+      }
+    }, 2000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+      void refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.clearTimeout(initialTimeout);
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      requestIdRef.current += 1;
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      requestInFlightRef.current = false;
     };
   }, [refresh]);
 
@@ -67,7 +107,7 @@ export default function AdminOrderDetails() {
     try {
       await updateAdminOrderStatus(order.id, status);
       setNotice(`Order moved to ${status}.`);
-      await refresh();
+      await refresh(false, true);
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -110,7 +150,7 @@ export default function AdminOrderDetails() {
           ? "Manual payment marked verified."
           : "Payment claim rejected.",
       );
-      await refresh();
+      await refresh(false, true);
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -157,11 +197,11 @@ export default function AdminOrderDetails() {
       </Link>
 
       <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#b56b36]">
             Order details
           </p>
-          <h1 className="mt-1 font-serif text-3xl font-semibold text-[#253b2a]">
+          <h1 className="mt-1 break-all font-serif text-3xl font-semibold text-[#253b2a]">
             {order.order_number}
           </h1>
         </div>
@@ -183,7 +223,7 @@ export default function AdminOrderDetails() {
         <section className="rounded-2xl border border-[#e7e4d8] bg-white p-5 shadow-sm">
           <h2 className="font-serif text-xl font-semibold text-[#253b2a]">Customer</h2>
           <dl className="mt-4 space-y-3 text-sm">
-            <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Name</dt><dd className="text-right font-medium">{order.customer_name}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="shrink-0 text-[#73796d]">Name</dt><dd className="min-w-0 break-all text-right font-medium">{order.customer_name}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Phone</dt><dd className="text-right font-medium">{order.customer_phone || "Not provided"}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Pickup type</dt><dd className="font-medium">{order.fulfillment_type === "PICKUP" ? "Counter pickup" : "Table"}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Placed</dt><dd className="text-right font-medium">{new Date(order.created_at).toLocaleString()}</dd></div>
@@ -286,8 +326,8 @@ export default function AdminOrderDetails() {
           <ul className="mt-5 divide-y divide-[#eeece4] border-t border-[#eeece4]">
             {order.items.map((item, index) => (
               <li key={`${item.productId}-${item.size}-${index}`} className="flex justify-between gap-4 py-3 text-sm">
-                <div>
-                  <p className="font-medium text-[#394b38]">{item.productName}</p>
+                <div className="min-w-0">
+                  <p className="break-all font-medium text-[#394b38]">{item.productName}</p>
                   <p className="text-xs text-[#73796d]">{item.size} · Qty {item.quantity} · {formatPrice(item.unitPrice)} each</p>
                 </div>
                 <span className="shrink-0 font-semibold tabular-nums">{formatPrice(item.unitPrice * item.quantity)}</span>
@@ -300,7 +340,7 @@ export default function AdminOrderDetails() {
           <span className="tabular-nums">{formatPrice(order.total_amount)}</span>
         </div>
       </section>
-      <p className="text-xs text-[#858a7e]">Order details refresh automatically every 7 seconds.</p>
+      <p className="text-xs text-[#858a7e]">Order details refresh automatically every 2 seconds while this page is visible.</p>
     </div>
   );
 }

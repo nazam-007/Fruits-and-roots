@@ -1,5 +1,9 @@
-import { randomBytes, scryptSync } from "node:crypto";
 import { stdin, stdout } from "node:process";
+import {
+  createAdminPasswordHash,
+  MAX_ADMIN_PASSWORD_LENGTH,
+  MIN_ADMIN_PASSWORD_LENGTH,
+} from "./adminPassword";
 
 function readPassword(): Promise<string> {
   if (!stdin.isTTY || typeof stdin.setRawMode !== "function") {
@@ -45,14 +49,8 @@ function readPassword(): Promise<string> {
 
 async function main() {
   const password = await readPassword();
-  if (password.length < 6 || password.length > 10) {
-    throw new Error("Use an admin password between 6 and 10 characters.");
-  }
-  const salt = randomBytes(16);
-  const derivedKey = scryptSync(password, salt, 64);
-  stdout.write(
-    `ADMIN_PASSWORD_HASH=scrypt:${salt.toString("base64url")}:${derivedKey.toString("base64url")}\n`,
-  );
+  const passwordHash = createAdminPasswordHash(password);
+  stdout.write(`ADMIN_PASSWORD_HASH=${passwordHash}\n`);
 }
 
 void main().catch((error: unknown) => {

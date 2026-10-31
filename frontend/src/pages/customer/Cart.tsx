@@ -9,7 +9,7 @@ import {
   ShoppingBag,
   Trash2,
 } from "lucide-react";
-import { useCart } from "../../context/CartContext";
+import { useCart } from "../../context/useCart";
 import { useMenu } from "../../context/MenuContext";
 import MenuItemImage from "../../components/customer/MenuItemImage";
 

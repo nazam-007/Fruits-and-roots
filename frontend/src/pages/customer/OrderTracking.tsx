@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Check, Clock3, RefreshCw, ShieldCheck } from "lucide-react";
 import {
@@ -29,6 +29,7 @@ const orderProgress: OrderStatus[] = [
   "READY",
   "COMPLETED",
 ];
+const terminalOrderStatuses: OrderStatus[] = ["COMPLETED", "CANCELLED"];
 
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
 const pickupMessage =
@@ -39,8 +40,11 @@ export default function OrderTracking() {
   const [order, setOrder] = useState<OrderDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const requestInFlightRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
-  const refreshStatus = useCallback(async () => {
+  const refreshStatus = useCallback(async (showLoading = false) => {
     if (!orderId) {
       setError("Order not found.");
       setLoading(false);
@@ -63,26 +67,78 @@ export default function OrderTracking() {
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    if (
+      document.visibilityState === "hidden" ||
+      requestInFlightRef.current
+    ) {
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    requestInFlightRef.current = true;
+    if (showLoading) setLoading(true);
+
     try {
-      const latestOrder = await fetchOrder(orderId, token);
+      const latestOrder = await fetchOrder(orderId, token, controller.signal);
+      if (requestId !== requestIdRef.current) return;
       setOrder(latestOrder);
+      setError(null);
     } catch (fetchError) {
+      if (controller.signal.aborted || requestId !== requestIdRef.current) {
+        return;
+      }
       setError(
         fetchError instanceof Error
           ? fetchError.message
           : "Unable to refresh order status.",
       );
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        controllerRef.current = null;
+        requestInFlightRef.current = false;
+        setLoading(false);
+      }
     }
   }, [orderId]);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => void refreshStatus(), 0);
-    return () => window.clearTimeout(timeoutId);
+    const timeoutId = window.setTimeout(() => void refreshStatus(true), 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      requestIdRef.current += 1;
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      requestInFlightRef.current = false;
+    };
   }, [refreshStatus]);
+
+  const currentOrderStatus = order?.orderStatus;
+  useEffect(() => {
+    if (
+      currentOrderStatus &&
+      terminalOrderStatuses.includes(currentOrderStatus)
+    ) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refreshStatus();
+      }
+    }, 2000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshStatus();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [currentOrderStatus, refreshStatus]);
 
   if (!order && loading) {
     return (
@@ -100,7 +156,7 @@ export default function OrderTracking() {
         </p>
         <button
           type="button"
-          onClick={() => void refreshStatus()}
+          onClick={() => void refreshStatus(true)}
           disabled={loading}
           className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-full bg-[#31573a] px-5 font-semibold text-white disabled:opacity-50"
         >
@@ -214,7 +270,7 @@ export default function OrderTracking() {
       </section>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">
+        <section className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#b56b36]">
@@ -274,7 +330,7 @@ export default function OrderTracking() {
           </ol>
         </section>
 
-        <aside className="rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">
+        <aside className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">
           <h2 className="font-serif text-xl font-semibold text-[#253b2a]">
             Order details
           </h2>
@@ -287,7 +343,7 @@ export default function OrderTracking() {
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-[#73796d]">Name</dt>
-              <dd className="text-right font-medium text-[#253b2a]">
+              <dd className="min-w-0 break-all text-right font-medium text-[#253b2a]">
                 {order.customerName}
               </dd>
             </div>
@@ -315,8 +371,8 @@ export default function OrderTracking() {
                 key={`${item.productName}-${item.size}-${index}`}
                 className="flex justify-between gap-3 text-sm"
               >
-                <div>
-                  <p className="font-medium text-[#394b38]">
+                <div className="min-w-0">
+                  <p className="break-all font-medium text-[#394b38]">
                     {item.productName}
                   </p>
                   <p className="text-xs text-[#7a8074]">
