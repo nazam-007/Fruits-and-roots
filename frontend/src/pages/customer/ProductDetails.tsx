@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, ShoppingCart } from "lucide-react";
 
 import { useMenu } from "../../context/MenuContext";
-import { useCart } from "../../context/CartContext";
+import { useCart } from "../../context/useCart";
 import MenuItemImage from "../../components/customer/MenuItemImage";
 
 type Size = "Regular" | "Large";
@@ -105,12 +105,12 @@ export default function ProductDetails() {
           />
         </div>
 
-        <div className="flex flex-col justify-center">
+        <div className="min-w-0 flex flex-col justify-center">
           <p className="text-sm font-semibold uppercase tracking-widest text-orange-600">
             {product.category}
           </p>
 
-          <h1 className="mt-3 text-3xl font-bold text-[#354632] sm:text-4xl">
+          <h1 className="mt-3 break-words text-3xl font-bold text-[#354632] sm:text-4xl">
             {product.name}
           </h1>
 

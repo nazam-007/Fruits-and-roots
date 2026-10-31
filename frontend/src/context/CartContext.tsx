@@ -1,40 +1,17 @@
 import {
-  createContext,
-  useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
-
-import type { MenuVariant } from "../data/menu";
-
-export type CartItem = {
-  id: string;
-  name: string;
-  size: MenuVariant["size"];
-  price: number;
-  quantity: number;
-};
-
-type CartContextType = {
-  cart: CartItem[];
-  cartCount: number;
-  cartTotal: number;
-  addToCart: (item: CartItem) => void;
-  clearCart: () => void;
-  updateQuantity: (
-    id: string,
-    size: MenuVariant["size"],
-    quantity: number,
-  ) => void;
-  removeFromCart: (id: string, size: MenuVariant["size"]) => void;
-};
+import {
+  CartContext,
+  type CartContextType,
+  type CartItem,
+} from "./cartContextStore";
 
 const MAX_QUANTITY = 99;
 const CART_STORAGE_KEY = "fruits-and-roots-cart";
-
-const CartContext = createContext<CartContextType | undefined>(undefined);
 
 function isCartItem(value: unknown): value is CartItem {
   if (typeof value !== "object" || value === null) return false;
@@ -151,14 +128,4 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [cart]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
-}
-
-export function useCart() {
-  const context = useContext(CartContext);
-
-  if (!context) {
-    throw new Error("useCart must be used inside CartProvider");
-  }
-
-  return context;
 }

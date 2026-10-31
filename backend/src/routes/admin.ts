@@ -2,11 +2,15 @@ import {
   createHash,
   randomBytes,
   randomUUID,
-  scryptSync,
   timingSafeEqual,
 } from "node:crypto";
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
+import {
+  MAX_ADMIN_PASSWORD_LENGTH,
+  MIN_ADMIN_PASSWORD_LENGTH,
+  verifyAdminPassword,
+} from "../adminPassword";
 import { db } from "../db";
 
 const router = Router();
@@ -36,23 +40,6 @@ function isDemoMode() {
 
 function adminConfigured() {
   return Boolean(process.env.ADMIN_USERNAME && process.env.ADMIN_PASSWORD_HASH);
-}
-
-function verifyPassword(password: string, encodedHash: string) {
-  const [algorithm, salt, digest] = encodedHash.split(":");
-  if (
-    algorithm !== "scrypt" ||
-    !salt ||
-    !digest ||
-    !/^[A-Za-z0-9_-]{22,}$/.test(salt) ||
-    !/^[A-Za-z0-9_-]{40,}$/.test(digest)
-  ) {
-    return false;
-  }
-
-  const expected = Buffer.from(digest, "base64url");
-  const actual = scryptSync(password, Buffer.from(salt, "base64url"), expected.length);
-  return expected.length === actual.length && timingSafeEqual(expected, actual);
 }
 
 function setSessionCookie(res: import("express").Response, token: string) {
@@ -154,6 +141,10 @@ function rateLimit(maxRequests: number, windowMs: number): RequestHandler {
 }
 
 router.use(requireAllowedOrigin);
+router.use((_req, res, next) => {
+  res.setHeader("Cache-Control", "no-store");
+  next();
+});
 
 router.post(
   "/auth/login",
@@ -165,18 +156,20 @@ router.post(
     }
     const parsed = z.object({
       username: z.string().min(1).max(120),
-      password: z.string().min(6).max(10),
+      password: z.string()
+        .min(MIN_ADMIN_PASSWORD_LENGTH)
+        .max(MAX_ADMIN_PASSWORD_LENGTH),
     }).safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({
-        message: "Enter your admin username and a password between 6 and 10 characters.",
+        message: `Enter your admin username and a password between ${MIN_ADMIN_PASSWORD_LENGTH} and ${MAX_ADMIN_PASSWORD_LENGTH} characters.`,
       });
       return;
     }
 
     const configuredUsername = process.env.ADMIN_USERNAME!;
     const usernameMatches = safeEqual(parsed.data.username, configuredUsername);
-    const passwordMatches = verifyPassword(
+    const passwordMatches = verifyAdminPassword(
       parsed.data.password,
       process.env.ADMIN_PASSWORD_HASH!,
     );
@@ -231,46 +224,35 @@ router.use(requireAdmin);
 
 router.get("/dashboard", async (_req, res) => {
   try {
-    const [summary, recentOrders] = await Promise.all([
-      db.query(
-        `WITH local_day AS (
-           SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date::timestamp
-                   AT TIME ZONE 'Asia/Kolkata') AS start_at
-         )
-         SELECT
-           COUNT(*) FILTER (WHERE o.created_at >= local_day.start_at)::int AS total_orders_today,
-           COUNT(*) FILTER (WHERE o.order_status = 'PLACED' AND o.created_at >= local_day.start_at)::int AS new_orders,
-           COUNT(*) FILTER (WHERE o.order_status = 'PREPARING' AND o.created_at >= local_day.start_at)::int AS preparing_orders,
-           COUNT(*) FILTER (WHERE o.order_status = 'READY' AND o.created_at >= local_day.start_at)::int AS ready_orders,
-           COUNT(*) FILTER (WHERE o.order_status = 'COMPLETED' AND o.created_at >= local_day.start_at)::int AS completed_orders,
-           COALESCE(SUM(o.total_amount) FILTER (
-             WHERE o.payment_status = 'PAID'
-               AND p.payment_source = 'MANUAL_UPI'
-               AND p.verified_at IS NOT NULL
-               AND o.created_at >= local_day.start_at
-           ), 0)::bigint AS verified_revenue_today,
-           COALESCE(SUM(o.total_amount) FILTER (
-             WHERE o.payment_status = 'PAID'
-               AND p.payment_source = 'DEMO'
-               AND o.created_at >= local_day.start_at
-           ), 0)::bigint AS demo_revenue_today
-         FROM orders o
-         CROSS JOIN local_day
-         LEFT JOIN payments p ON p.order_id = o.id`,
-      ),
-      db.query(
-        `SELECT o.id, o.order_number, o.customer_name, o.total_amount,
-                o.payment_status, o.order_status, o.created_at,
-                p.payment_source
-         FROM orders o
-         JOIN payments p ON p.order_id = o.id
-         ORDER BY o.created_at DESC NULLS LAST
-         LIMIT 10`,
-      ),
-    ]);
+    const summary = await db.query(
+      `WITH local_day AS (
+         SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date::timestamp
+                 AT TIME ZONE 'Asia/Kolkata') AS start_at
+       )
+       SELECT
+         (SELECT COUNT(*)::int FROM orders) AS all_orders,
+         COUNT(*) FILTER (WHERE o.created_at >= local_day.start_at)::int AS total_orders_today,
+         COUNT(*) FILTER (WHERE o.order_status = 'PLACED' AND o.created_at >= local_day.start_at)::int AS new_orders,
+         COUNT(*) FILTER (WHERE o.order_status = 'PREPARING' AND o.created_at >= local_day.start_at)::int AS preparing_orders,
+         COUNT(*) FILTER (WHERE o.order_status = 'READY' AND o.created_at >= local_day.start_at)::int AS ready_orders,
+         COUNT(*) FILTER (WHERE o.order_status = 'COMPLETED' AND o.created_at >= local_day.start_at)::int AS completed_orders,
+         COALESCE(SUM(o.total_amount) FILTER (
+           WHERE o.payment_status = 'PAID'
+             AND p.payment_source = 'MANUAL_UPI'
+             AND p.verified_at IS NOT NULL
+             AND o.created_at >= local_day.start_at
+         ), 0)::bigint AS verified_revenue_today,
+         COALESCE(SUM(o.total_amount) FILTER (
+           WHERE o.payment_status = 'PAID'
+             AND p.payment_source = 'DEMO'
+             AND o.created_at >= local_day.start_at
+         ), 0)::bigint AS demo_revenue_today
+       FROM orders o
+       CROSS JOIN local_day
+       LEFT JOIN payments p ON p.order_id = o.id`,
+    );
     res.json({
       summary: summary.rows[0],
-      recentOrders: recentOrders.rows,
       demoPaymentsEnabled: isDemoMode(),
     });
   } catch (error) {
@@ -293,7 +275,7 @@ router.get("/orders", async (req, res) => {
   }
 
   try {
-    const [orders, count] = await Promise.all([
+    const [orders, count, statusCount] = await Promise.all([
       db.query(
         `SELECT o.id, o.order_number, o.customer_name, o.customer_phone,
                 o.fulfillment_type, o.total_amount, o.payment_status,
@@ -311,12 +293,30 @@ router.get("/orders", async (req, res) => {
          WHERE ($1 = 'ALL' OR order_status = $1)`,
         [parsed.data.status],
       ),
+      db.query(
+        `SELECT
+           COUNT(*)::int AS all_orders,
+           COUNT(*) FILTER (WHERE order_status = 'PLACED')::int AS placed_orders,
+           COUNT(*) FILTER (WHERE order_status = 'PREPARING')::int AS preparing_orders,
+           COUNT(*) FILTER (WHERE order_status = 'READY')::int AS ready_orders,
+           COUNT(*) FILTER (WHERE order_status = 'COMPLETED')::int AS completed_orders,
+           COUNT(*) FILTER (WHERE order_status = 'CANCELLED')::int AS cancelled_orders
+         FROM orders`,
+      ),
     ]);
     res.json({
       items: orders.rows,
       total: count.rows[0].total,
       limit: parsed.data.limit,
       offset: parsed.data.offset,
+      statusCounts: {
+        ALL: statusCount.rows[0].all_orders,
+        PLACED: statusCount.rows[0].placed_orders,
+        PREPARING: statusCount.rows[0].preparing_orders,
+        READY: statusCount.rows[0].ready_orders,
+        COMPLETED: statusCount.rows[0].completed_orders,
+        CANCELLED: statusCount.rows[0].cancelled_orders,
+      },
     });
   } catch (error) {
     console.error("Admin order list query failed", {

@@ -26,6 +26,11 @@ export type AdminOrderRow = {
   payment_source: AdminPaymentSource;
 };
 
+export type AdminOrderStatusCounts = Record<
+  "ALL" | AdminOrderStatus,
+  number
+>;
+
 export type AdminOrderDetails = AdminOrderRow & {
   recorded_payment_status: AdminPaymentStatus | null;
   transaction_reference: string | null;
@@ -44,6 +49,7 @@ export type AdminOrderDetails = AdminOrderRow & {
 
 export type AdminDashboardData = {
   summary: {
+    all_orders: number;
     total_orders_today: number;
     new_orders: number;
     preparing_orders: number;
@@ -52,7 +58,6 @@ export type AdminDashboardData = {
     verified_revenue_today: number;
     demo_revenue_today: number;
   };
-  recentOrders: AdminOrderRow[];
   demoPaymentsEnabled: boolean;
 };
 
@@ -133,28 +138,40 @@ export function logoutAdmin() {
   return request<void>("/auth/logout", { method: "POST" });
 }
 
-export function fetchDashboard() {
-  return request<AdminDashboardData>("/dashboard");
+export function fetchDashboard(signal?: AbortSignal) {
+  return request<AdminDashboardData>(
+    "/dashboard",
+    { signal, cache: "no-store" },
+  );
 }
 
 export function fetchAdminOrders(
   status: "ALL" | AdminOrderStatus,
   limit: number,
   offset: number,
+  signal?: AbortSignal,
 ) {
   const query = new URLSearchParams({
     status,
     limit: String(limit),
     offset: String(offset),
   });
-  return request<{ items: AdminOrderRow[]; total: number; limit: number; offset: number }>(
+  return request<{
+    items: AdminOrderRow[];
+    total: number;
+    limit: number;
+    offset: number;
+    statusCounts: AdminOrderStatusCounts;
+  }>(
     `/orders?${query}`,
+    { signal, cache: "no-store" },
   );
 }
 
-export function fetchAdminOrder(orderId: string) {
+export function fetchAdminOrder(orderId: string, signal?: AbortSignal) {
   return request<AdminOrderDetails>(
     `/orders/${encodeURIComponent(orderId)}`,
+    { signal, cache: "no-store" },
   );
 }
 

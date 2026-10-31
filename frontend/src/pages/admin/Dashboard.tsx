@@ -1,12 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, CheckCircle2, Clock3, IndianRupee, PackageCheck, RefreshCw } from "lucide-react";
-import { fetchDashboard, type AdminDashboardData } from "../../services/adminApi";
+import { Activity, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Clock3, IndianRupee, PackageCheck, RefreshCw } from "lucide-react";
+import {
+  fetchAdminOrders,
+  fetchDashboard,
+  type AdminDashboardData,
+  type AdminOrderRow,
+} from "../../services/adminApi";
 
+const PAGE_SIZE = 25;
 const formatPrice = (amount: number) =>
   `₹${Number(amount).toLocaleString("en-IN")}`;
 
 const cards = [
+  { key: "all_orders", label: "All orders", icon: ClipboardList },
   { key: "total_orders_today", label: "Orders today", icon: Activity },
   { key: "new_orders", label: "New orders", icon: Clock3 },
   { key: "preparing_orders", label: "Preparing", icon: RefreshCw },
@@ -16,33 +23,86 @@ const cards = [
 
 export default function Dashboard() {
   const [data, setData] = useState<AdminDashboardData | null>(null);
+  const [orders, setOrders] = useState<AdminOrderRow[]>([]);
+  const [ordersTotal, setOrdersTotal] = useState(0);
+  const [ordersOffset, setOrdersOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestInFlightRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
+    if (
+      document.visibilityState === "hidden" ||
+      requestInFlightRef.current
+    ) {
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    requestInFlightRef.current = true;
     try {
-      const latest = await fetchDashboard();
+      const [latest, orderPage] = await Promise.all([
+        fetchDashboard(controller.signal),
+        fetchAdminOrders("ALL", PAGE_SIZE, ordersOffset, controller.signal),
+      ]);
+      if (requestId !== requestIdRef.current) return;
       setData(latest);
+      setOrders(orderPage.items);
+      setOrdersTotal(orderPage.total);
       setError(null);
+      if (ordersOffset > 0 && ordersOffset >= orderPage.total) {
+        setOrdersOffset(
+          Math.max(0, Math.ceil(orderPage.total / PAGE_SIZE) - 1) * PAGE_SIZE,
+        );
+      }
     } catch (requestError) {
+      if (controller.signal.aborted || requestId !== requestIdRef.current) {
+        return;
+      }
       setError(
         requestError instanceof Error
           ? requestError.message
           : "Unable to load dashboard data.",
       );
     } finally {
+      if (requestId === requestIdRef.current) {
+      controllerRef.current = null;
+      requestInFlightRef.current = false;
       setLoading(false);
+      }
     }
-  }, []);
+  }, [ordersOffset]);
 
   useEffect(() => {
     const initialTimeout = window.setTimeout(() => void refresh(), 0);
-    const intervalId = window.setInterval(() => void refresh(), 7000);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+      void refresh();
+      }
+    }, 2000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+      void refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.clearTimeout(initialTimeout);
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      requestIdRef.current += 1;
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      requestInFlightRef.current = false;
     };
   }, [refresh]);
+
+  const start = ordersTotal === 0 ? 0 : ordersOffset + 1;
+  const end = Math.min(ordersOffset + PAGE_SIZE, ordersTotal);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -60,7 +120,7 @@ export default function Dashboard() {
         </div>
         <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-medium text-[#596554] shadow-sm">
           <span className="h-2 w-2 animate-pulse rounded-full bg-[#5d8a4c]" />
-          Updates every 7 seconds
+          Updates every 2 seconds while visible
         </span>
       </header>
 
@@ -78,8 +138,8 @@ export default function Dashboard() {
       )}
 
       <section
-        aria-label="Today's order statistics"
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
+        aria-label="Order statistics"
+        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6"
       >
         {cards.map(({ key, label, icon: Icon }) => (
           <article key={key} className="rounded-2xl border border-[#e7e4d8] bg-white p-4 shadow-sm">
@@ -124,10 +184,10 @@ export default function Dashboard() {
         <div className="flex items-center justify-between border-b border-[#eeece4] px-5 py-4">
           <div>
             <h2 className="font-serif text-xl font-semibold text-[#253b2a]">
-              Recent orders
+              All orders
             </h2>
             <p className="mt-1 text-xs text-[#73796d]">
-              Automatically refreshes while this page is open.
+              All orders, with automatic updates while this page is visible.
             </p>
           </div>
           <Link
@@ -141,7 +201,7 @@ export default function Dashboard() {
           <p role="status" className="p-6 text-sm text-[#73796d]">
             Loading recent orders...
           </p>
-        ) : data?.recentOrders.length ? (
+        ) : orders.length ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[700px] text-left text-sm">
               <thead className="bg-[#f8f8f2] text-xs uppercase tracking-wide text-[#73796d]">
@@ -155,7 +215,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#eeece4]">
-                {data.recentOrders.map((order) => (
+                {orders.map((order) => (
                   <tr key={order.id} className="hover:bg-[#fdfcf9]">
                     <td className="px-5 py-3">
                       <Link
@@ -187,9 +247,32 @@ export default function Dashboard() {
           </div>
         ) : (
           <p className="p-6 text-sm text-[#73796d]">
-            {error ? "Recent orders are temporarily unavailable." : "No orders yet today."}
+            {error ? "Orders are temporarily unavailable." : "No orders found."}
           </p>
         )}
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#eeece4] px-4 py-3 text-sm text-[#73796d]">
+          <span>{start}–{end} of {ordersTotal}</span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setOrdersOffset(Math.max(0, ordersOffset - PAGE_SIZE))}
+              disabled={ordersOffset === 0 || loading}
+              aria-label="Previous orders page"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#dfe3d8] disabled:opacity-40"
+            >
+              <ChevronLeft size={17} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrdersOffset(ordersOffset + PAGE_SIZE)}
+              disabled={ordersOffset + PAGE_SIZE >= ordersTotal || loading}
+              aria-label="Next orders page"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#dfe3d8] disabled:opacity-40"
+            >
+              <ChevronRight size={17} aria-hidden="true" />
+            </button>
+          </div>
+        </footer>
       </section>
     </div>
   );

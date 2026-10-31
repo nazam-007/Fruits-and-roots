@@ -42,16 +42,17 @@ Edit `backend\.env` and configure the required values:
 | `NODE_ENV` | Use `development` locally; set to `production` when deployed. |
 | `DEMO_PAYMENTS_ENABLED` | Set to `true` only to enable the development demo-payment flow. |
 | `PORT` | Backend HTTP port; defaults to `5000`. |
-| `FRONTEND_ORIGIN` | Allowed frontend origin(s), comma-separated; local default is `http://localhost:5173`. |
+| `FRONTEND_ORIGIN` | Exact allowed frontend origin(s), comma-separated; local default is `http://localhost:5173`. Production requires HTTPS origins. |
 | `DATABASE_URL` | PostgreSQL connection string. Keep it on the backend only. |
 | `MERCHANT_UPI_ID` | Merchant UPI ID used to display payment instructions. |
 | `MERCHANT_UPI_NAME` | Merchant display name for payment instructions. |
 | `ORDER_TRACKING_SECRET` | Long, random secret used to protect order-tracking access. |
 | `ADMIN_USERNAME` | Admin login username. |
-| `ADMIN_PASSWORD_HASH` | Scrypt password hash; generate it as described below. |
+| `ADMIN_PASSWORD_HASH` | Scrypt password hash; generate it as described below. Passwords may be 6–128 characters; use a long unique passphrase. |
 | `SUPABASE_URL` | Supabase project URL for optional image uploads. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service-role key for optional uploads. **Backend only; never add it to frontend variables or source code.** |
 | `MENU_STORAGE_BUCKET` | Storage bucket name; defaults to `menu-images`. |
+| `TRUSTED_PROXY_IPS` | Optional comma-separated proxy IP addresses/CIDRs. Leave unset unless requests arrive through trusted proxies that overwrite forwarded-for headers. |
 
 Generate the admin password hash by running this in an interactive terminal:
 
@@ -61,7 +62,7 @@ npm install
 npm run admin:hash-password
 ```
 
-Enter an admin password between 6 and 10 characters when prompted. Copy the printed `ADMIN_PASSWORD_HASH` value into `backend\.env`; do not put the plain-text password or hash in frontend code or commit either value.
+Enter an admin password between 6 and 128 characters when prompted; a long, unique passphrase is recommended. Copy the printed `ADMIN_PASSWORD_HASH` value into `backend\.env`; do not put the plain-text password or hash in frontend code, logs, or source control. Existing valid scrypt hashes remain compatible.
 
 Install dependencies and start the backend:
 
@@ -171,14 +172,40 @@ Set-Location backend
 npm run build
 ```
 
-The backend `npm test` script is currently a placeholder; there is no configured backend test suite yet.
+The backend tests cover admin password hash compatibility and the extended passphrase length policy.
 
-## Production notes
+## Production security checklist
 
-- Use HTTPS and set `NODE_ENV=production`.
-- Set `DEMO_PAYMENTS_ENABLED=false`. Demo payment must not be used to verify real payments.
-- Store secrets in the deployment platform's secret manager, not in source control.
-- Use a least-privilege database role where possible, and keep the Supabase service-role key exclusively on the backend.
-- Configure CORS with the exact deployed frontend origin(s).
-- Back up the database before applying schema migrations.
-- Manual UPI payment claims require staff to independently verify receipt before marking an order paid.
+- [ ] Terminate HTTPS at the public ingress/load balancer and redirect HTTP to HTTPS. Express does not issue TLS certificates. Set `NODE_ENV=production`; the admin cookie uses `Secure` and Helmet enables HSTS in production.
+- [ ] Set `FRONTEND_ORIGIN` to exact HTTPS frontend origin(s), comma-separated, with no paths or wildcards. Production startup rejects missing, non-HTTPS, or non-exact origins.
+- [ ] Store `DATABASE_URL`, `ADMIN_PASSWORD_HASH`, `ORDER_TRACKING_SECRET`, merchant configuration, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` in the deployment secret manager. Rotate credentials if exposed. Keep service-role credentials exclusively on the backend.
+- [ ] Use a dedicated least-privilege PostgreSQL role for the backend. Require TLS for Supabase PostgreSQL connections (for example, provider-supported `sslmode=require`) and verify permissions before deployment.
+- [ ] Review Supabase Storage bucket visibility, upload size/type limits, and object policies. Public reads are needed for current public menu image URLs; writes should remain through the authenticated backend only.
+- [ ] Rate limits are stored in process memory. They reset on restart and are not shared across instances; use a shared store if deploying multiple backend instances. This project does not configure an external rate-limit store.
+- [ ] Express does not trust forwarded IP headers by default. If deployed behind a proxy, set `TRUSTED_PROXY_IPS` only to exact proxy IPs/CIDRs, and configure the proxy to overwrite forwarded-for headers rather than preserve untrusted client values. Do not set broad trust values such as `true`.
+- [ ] Set `DEMO_PAYMENTS_ENABLED=false`. Demo payment is enabled only in development; never represent demo payments as real revenue.
+- [ ] Enable provider-side access/error monitoring and alerts for repeated login failures, rate-limit responses, database errors, and storage upload failures. Avoid logging passwords, tokens, or secret values.
+- [ ] Back up the database before applying schema migrations; review and apply them using the established migration workflow.
+- [ ] Manual UPI payment claims require staff to independently verify receipt before marking an order paid.
+
+The following read-only SQL can help review PostgreSQL grants and policies; review the results with a database administrator. These queries do not change schema or permissions:
+
+```sql
+SELECT current_user, session_user;
+
+SELECT table_schema, table_name, grantee, privilege_type
+FROM information_schema.role_table_grants
+WHERE table_schema IN ('public', 'storage')
+ORDER BY table_schema, table_name, grantee, privilege_type;
+
+SELECT schemaname, tablename, policyname, roles, cmd
+FROM pg_policies
+WHERE schemaname IN ('public', 'storage')
+ORDER BY schemaname, tablename, policyname;
+
+SELECT id, name, public, file_size_limit, allowed_mime_types
+FROM storage.buckets
+ORDER BY name;
+```
+
+Verify actual service role, grants, RLS policies, and Storage bucket policies in Supabase. Do not enable RLS or change privileges without reviewing application access requirements.

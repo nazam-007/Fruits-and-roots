@@ -7,7 +7,7 @@ import {
   RefreshCw,
   ShieldAlert,
 } from "lucide-react";
-import { useCart } from "../../context/CartContext";
+import { useCart } from "../../context/useCart";
 import { useCheckout } from "../../context/CheckoutContext";
 import {
   fetchOrder,
@@ -186,7 +186,7 @@ export default function Payment() {
       </Link>
 
       <header className="mb-6 sm:mb-8">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#b56b36]">
+        <p className="mb-1 break-all text-xs font-semibold uppercase tracking-[0.16em] text-[#b56b36]">
           Counter pickup · {order.orderNumber}
         </p>
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#253b2a] sm:text-4xl">
@@ -218,15 +218,15 @@ export default function Payment() {
       )}
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-8">
-        <section className="rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-[0_8px_30px_-25px_rgba(30,51,35,0.5)] sm:p-6">
+        <section className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-[0_8px_30px_-25px_rgba(30,51,35,0.5)] sm:p-6">
           <div className="mb-5">
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#b56b36]">
               UPI payment
             </p>
-            <h2 className="font-serif text-xl font-semibold text-[#253b2a] sm:text-2xl">
+            <h2 className="break-all font-serif text-xl font-semibold text-[#253b2a] sm:text-2xl">
               Order {order.orderNumber}
             </h2>
-            <p className="mt-1 text-sm text-[#73796d]">
+              <p className="mt-1 break-all text-sm text-[#73796d]">
               Customer: {order.customerName}
             </p>
             {order.orderStatus === "CANCELLED" && (

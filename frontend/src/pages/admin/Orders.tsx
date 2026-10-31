@@ -5,6 +5,7 @@ import {
   fetchAdminOrders,
   type AdminOrderRow,
   type AdminOrderStatus,
+  type AdminOrderStatusCounts,
 } from "../../services/adminApi";
 
 const PAGE_SIZE = 25;
@@ -24,38 +25,81 @@ export default function Orders() {
   const [status, setStatus] = useState<"ALL" | AdminOrderStatus>("ALL");
   const [items, setItems] = useState<AdminOrderRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [statusCounts, setStatusCounts] = useState<AdminOrderStatusCounts | null>(null);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const fetchingRef = useRef(false);
+  const requestInFlightRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async (showLoading = false) => {
-    if (fetchingRef.current) return;
-    fetchingRef.current = true;
+    if (
+      document.visibilityState === "hidden" ||
+      requestInFlightRef.current
+    ) {
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    requestInFlightRef.current = true;
     if (showLoading) setLoading(true);
     try {
-      const page = await fetchAdminOrders(status, PAGE_SIZE, offset);
+      const page = await fetchAdminOrders(
+        status,
+        PAGE_SIZE,
+        offset,
+        controller.signal,
+      );
+      if (requestId !== requestIdRef.current) return;
       setItems(page.items);
       setTotal(page.total);
+      setStatusCounts(page.statusCounts);
       setError(null);
+      if (offset > 0 && offset >= page.total) {
+        setOffset(Math.max(0, Math.ceil(page.total / PAGE_SIZE) - 1) * PAGE_SIZE);
+      }
     } catch (requestError) {
+      if (controller.signal.aborted || requestId !== requestIdRef.current) {
+        return;
+      }
       setError(
         requestError instanceof Error
           ? requestError.message
           : "Unable to load orders.",
       );
     } finally {
-      fetchingRef.current = false;
-      setLoading(false);
+      if (requestId === requestIdRef.current) {
+        controllerRef.current = null;
+        requestInFlightRef.current = false;
+        setLoading(false);
+      }
     }
   }, [offset, status]);
 
   useEffect(() => {
     const initialTimeout = window.setTimeout(() => void refresh(true), 0);
-    const intervalId = window.setInterval(() => void refresh(), 8000);
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+      }
+    }, 2000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refresh();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       window.clearTimeout(initialTimeout);
       window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      requestIdRef.current += 1;
+      controllerRef.current?.abort();
+      controllerRef.current = null;
+      requestInFlightRef.current = false;
     };
   }, [refresh]);
 
@@ -102,7 +146,7 @@ export default function Orders() {
                 : "border border-[#dfe3d8] bg-white text-[#596554] hover:bg-[#f2f4ed]"
             }`}
           >
-            {label}
+            {statusCounts ? `${label} (${statusCounts[filter]})` : label}
           </button>
         ))}
       </div>
@@ -197,7 +241,7 @@ export default function Orders() {
           </div>
         </footer>
       </section>
-      <p className="text-xs text-[#858a7e]">New orders refresh automatically every 8 seconds.</p>
+      <p className="text-xs text-[#858a7e]">Orders and status counts refresh automatically every 2 seconds while this page is visible.</p>
     </div>
   );
 }
