@@ -8,6 +8,7 @@ import {
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import { db } from "../db";
+import { publishOrderStatus } from "../orderStatusEvents";
 
 const router = Router();
 const SESSION_COOKIE = "fr_admin_session";
@@ -238,11 +239,13 @@ router.get("/dashboard", async (_req, res) => {
                    AT TIME ZONE 'Asia/Kolkata') AS start_at
          )
          SELECT
-           COUNT(*) FILTER (WHERE o.created_at >= local_day.start_at)::int AS total_orders_today,
-           COUNT(*) FILTER (WHERE o.order_status = 'PLACED' AND o.created_at >= local_day.start_at)::int AS new_orders,
-           COUNT(*) FILTER (WHERE o.order_status = 'PREPARING' AND o.created_at >= local_day.start_at)::int AS preparing_orders,
-           COUNT(*) FILTER (WHERE o.order_status = 'READY' AND o.created_at >= local_day.start_at)::int AS ready_orders,
-           COUNT(*) FILTER (WHERE o.order_status = 'COMPLETED' AND o.created_at >= local_day.start_at)::int AS completed_orders,
+           COUNT(DISTINCT o.id)::int AS total_orders,
+           COUNT(DISTINCT o.id) FILTER (WHERE o.created_at >= local_day.start_at)::int AS total_orders_today,
+           COUNT(DISTINCT o.id) FILTER (WHERE o.order_status = 'PLACED' AND o.created_at >= local_day.start_at)::int AS new_orders,
+           COUNT(DISTINCT o.id) FILTER (WHERE o.order_status = 'PREPARING' AND o.created_at >= local_day.start_at)::int AS preparing_orders,
+           COUNT(DISTINCT o.id) FILTER (WHERE o.order_status = 'READY' AND o.created_at >= local_day.start_at)::int AS ready_orders,
+           COUNT(DISTINCT o.id) FILTER (WHERE o.order_status = 'COMPLETED' AND o.created_at >= local_day.start_at)::int AS completed_orders,
+           COUNT(DISTINCT o.id) FILTER (WHERE o.order_status = 'CANCELLED' AND o.created_at >= local_day.start_at)::int AS cancelled_orders,
            COALESCE(SUM(o.total_amount) FILTER (
              WHERE o.payment_status = 'PAID'
                AND p.payment_source = 'MANUAL_UPI'
@@ -293,7 +296,7 @@ router.get("/orders", async (req, res) => {
   }
 
   try {
-    const [orders, count] = await Promise.all([
+    const [orders, statusCount] = await Promise.all([
       db.query(
         `SELECT o.id, o.order_number, o.customer_name, o.customer_phone,
                 o.fulfillment_type, o.total_amount, o.payment_status,
@@ -306,15 +309,28 @@ router.get("/orders", async (req, res) => {
         [parsed.data.status, parsed.data.limit, parsed.data.offset],
       ),
       db.query(
-        `SELECT COUNT(*)::int AS total
-         FROM orders
-         WHERE ($1 = 'ALL' OR order_status = $1)`,
-        [parsed.data.status],
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE order_status = 'PLACED')::int AS placed,
+           COUNT(*) FILTER (WHERE order_status = 'PREPARING')::int AS preparing,
+           COUNT(*) FILTER (WHERE order_status = 'READY')::int AS ready,
+           COUNT(*) FILTER (WHERE order_status = 'COMPLETED')::int AS completed,
+           COUNT(*) FILTER (WHERE order_status = 'CANCELLED')::int AS cancelled
+         FROM orders`,
       ),
     ]);
+    const counts = {
+      ALL: statusCount.rows[0].total,
+      PLACED: statusCount.rows[0].placed,
+      PREPARING: statusCount.rows[0].preparing,
+      READY: statusCount.rows[0].ready,
+      COMPLETED: statusCount.rows[0].completed,
+      CANCELLED: statusCount.rows[0].cancelled,
+    };
     res.json({
       items: orders.rows,
-      total: count.rows[0].total,
+      total: counts[parsed.data.status],
+      counts,
       limit: parsed.data.limit,
       offset: parsed.data.offset,
     });
@@ -425,6 +441,7 @@ router.patch("/orders/:orderId/status", async (req, res) => {
       [orderId.data, parsedBody.data.status],
     );
     await client.query("COMMIT");
+    publishOrderStatus(orderId.data, parsedBody.data.status);
     res.json({ orderId: orderId.data, orderStatus: parsedBody.data.status });
   } catch (error) {
     await client.query("ROLLBACK");

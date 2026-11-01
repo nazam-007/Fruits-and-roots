@@ -1,17 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, CheckCircle2, Clock3, IndianRupee, PackageCheck, RefreshCw } from "lucide-react";
+import { Activity, CheckCircle2, ClipboardList, Clock3, IndianRupee, PackageCheck, RefreshCw, XCircle } from "lucide-react";
 import { fetchDashboard, type AdminDashboardData } from "../../services/adminApi";
+import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
 const formatPrice = (amount: number) =>
   `₹${Number(amount).toLocaleString("en-IN")}`;
 
 const cards = [
+  { key: "total_orders", label: "All Orders", icon: ClipboardList },
   { key: "total_orders_today", label: "Orders today", icon: Activity },
   { key: "new_orders", label: "New orders", icon: Clock3 },
   { key: "preparing_orders", label: "Preparing", icon: RefreshCw },
   { key: "ready_orders", label: "Ready for pickup", icon: PackageCheck },
   { key: "completed_orders", label: "Completed", icon: CheckCircle2 },
+  { key: "cancelled_orders", label: "Cancelled", icon: XCircle },
 ] as const;
 
 export default function Dashboard() {
@@ -19,30 +22,25 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (signal: AbortSignal) => {
     try {
-      const latest = await fetchDashboard();
+      const latest = await fetchDashboard(signal);
+      if (signal.aborted) return;
       setData(latest);
       setError(null);
     } catch (requestError) {
+      if (signal.aborted) return;
       setError(
         requestError instanceof Error
           ? requestError.message
           : "Unable to load dashboard data.",
       );
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    const initialTimeout = window.setTimeout(() => void refresh(), 0);
-    const intervalId = window.setInterval(() => void refresh(), 7000);
-    return () => {
-      window.clearTimeout(initialTimeout);
-      window.clearInterval(intervalId);
-    };
-  }, [refresh]);
+  const refreshNow = useVisiblePolling(refresh, 2000);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -60,7 +58,7 @@ export default function Dashboard() {
         </div>
         <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-medium text-[#596554] shadow-sm">
           <span className="h-2 w-2 animate-pulse rounded-full bg-[#5d8a4c]" />
-          Updates every 7 seconds
+          Updates every 2 seconds
         </span>
       </header>
 
@@ -69,7 +67,7 @@ export default function Dashboard() {
           <p role="alert">{error}</p>
           <button
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => void refreshNow()}
             className="font-semibold underline"
           >
             Retry
@@ -78,8 +76,8 @@ export default function Dashboard() {
       )}
 
       <section
-        aria-label="Today's order statistics"
-        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"
+        aria-label="Order statistics"
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
       >
         {cards.map(({ key, label, icon: Icon }) => (
           <article key={key} className="rounded-2xl border border-[#e7e4d8] bg-white p-4 shadow-sm">
@@ -187,7 +185,7 @@ export default function Dashboard() {
           </div>
         ) : (
           <p className="p-6 text-sm text-[#73796d]">
-            {error ? "Recent orders are temporarily unavailable." : "No orders yet today."}
+            {error ? "Recent orders are temporarily unavailable." : "No orders yet."}
           </p>
         )}
       </section>

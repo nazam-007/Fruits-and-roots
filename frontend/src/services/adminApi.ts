@@ -44,11 +44,13 @@ export type AdminOrderDetails = AdminOrderRow & {
 
 export type AdminDashboardData = {
   summary: {
+    total_orders: number;
     total_orders_today: number;
     new_orders: number;
     preparing_orders: number;
     ready_orders: number;
     completed_orders: number;
+    cancelled_orders: number;
     verified_revenue_today: number;
     demo_revenue_today: number;
   };
@@ -133,28 +135,34 @@ export function logoutAdmin() {
   return request<void>("/auth/logout", { method: "POST" });
 }
 
-export function fetchDashboard() {
-  return request<AdminDashboardData>("/dashboard");
+export function fetchDashboard(signal?: AbortSignal) {
+  return request<AdminDashboardData>("/dashboard", { signal });
 }
 
 export function fetchAdminOrders(
   status: "ALL" | AdminOrderStatus,
   limit: number,
   offset: number,
+  signal?: AbortSignal,
 ) {
   const query = new URLSearchParams({
     status,
     limit: String(limit),
     offset: String(offset),
   });
-  return request<{ items: AdminOrderRow[]; total: number; limit: number; offset: number }>(
-    `/orders?${query}`,
-  );
+  return request<{
+    items: AdminOrderRow[];
+    total: number;
+    counts: Record<"ALL" | AdminOrderStatus, number>;
+    limit: number;
+    offset: number;
+  }>(`/orders?${query}`, { signal });
 }
 
-export function fetchAdminOrder(orderId: string) {
+export function fetchAdminOrder(orderId: string, signal?: AbortSignal) {
   return request<AdminOrderDetails>(
     `/orders/${encodeURIComponent(orderId)}`,
+    { signal },
   );
 }
 

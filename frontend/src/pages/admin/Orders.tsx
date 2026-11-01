@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import {
   fetchAdminOrders,
   type AdminOrderRow,
   type AdminOrderStatus,
 } from "../../services/adminApi";
+import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
 const PAGE_SIZE = 25;
 const filters = [
@@ -16,53 +17,75 @@ const filters = [
   ["COMPLETED", "Completed"],
   ["CANCELLED", "Cancelled"],
 ] as const;
+const orderStatuses = ["ALL", "PLACED", "PREPARING", "READY", "COMPLETED", "CANCELLED"] as const;
+
+function isOrderStatus(value: string | null): value is (typeof orderStatuses)[number] {
+  return value !== null && orderStatuses.includes(value as (typeof orderStatuses)[number]);
+}
 
 const formatPrice = (amount: number) =>
   `₹${Number(amount).toLocaleString("en-IN")}`;
 
 export default function Orders() {
-  const [status, setStatus] = useState<"ALL" | AdminOrderStatus>("ALL");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlStatus = searchParams.get("status");
+  const status: "ALL" | AdminOrderStatus = isOrderStatus(urlStatus)
+    ? urlStatus
+    : "PLACED";
   const [items, setItems] = useState<AdminOrderRow[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [counts, setCounts] = useState<Record<"ALL" | AdminOrderStatus, number>>({
+    ALL: 0,
+    PLACED: 0,
+    PREPARING: 0,
+    READY: 0,
+    COMPLETED: 0,
+    CANCELLED: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const fetchingRef = useRef(false);
 
-  const refresh = useCallback(async (showLoading = false) => {
-    if (fetchingRef.current) return;
-    fetchingRef.current = true;
-    if (showLoading) setLoading(true);
+  const refresh = useCallback(async (signal: AbortSignal) => {
     try {
-      const page = await fetchAdminOrders(status, PAGE_SIZE, offset);
+      const page = await fetchAdminOrders(status, PAGE_SIZE, offset, signal);
+      if (signal.aborted) return;
       setItems(page.items);
       setTotal(page.total);
+      setCounts(page.counts);
       setError(null);
+      if (offset > 0 && offset >= page.total) {
+        setOffset(Math.max(0, Math.floor((page.total - 1) / PAGE_SIZE) * PAGE_SIZE));
+      }
     } catch (requestError) {
+      if (signal.aborted) return;
       setError(
         requestError instanceof Error
           ? requestError.message
           : "Unable to load orders.",
       );
     } finally {
-      fetchingRef.current = false;
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, [offset, status]);
 
-  useEffect(() => {
-    const initialTimeout = window.setTimeout(() => void refresh(true), 0);
-    const intervalId = window.setInterval(() => void refresh(), 8000);
-    return () => {
-      window.clearTimeout(initialTimeout);
-      window.clearInterval(intervalId);
-    };
-  }, [refresh]);
+  const refreshNow = useVisiblePolling(refresh, 2000, `${status}:${offset}`);
 
   const setFilter = (nextStatus: "ALL" | AdminOrderStatus) => {
-    setStatus(nextStatus);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("status", nextStatus);
+    setSearchParams(nextParams);
     setOffset(0);
+    setLoading(true);
   };
+
+  useEffect(() => {
+    if (!isOrderStatus(urlStatus)) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("status", "PLACED");
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, urlStatus]);
 
   const start = total === 0 ? 0 : offset + 1;
   const end = Math.min(offset + PAGE_SIZE, total);
@@ -80,7 +103,10 @@ export default function Orders() {
         </div>
         <button
           type="button"
-          onClick={() => void refresh(true)}
+          onClick={() => {
+            setLoading(true);
+            void refreshNow();
+          }}
           disabled={loading}
           className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[#dfe3d8] bg-white px-4 text-sm font-semibold text-[#31573a] disabled:opacity-50"
         >
@@ -102,7 +128,7 @@ export default function Orders() {
                 : "border border-[#dfe3d8] bg-white text-[#596554] hover:bg-[#f2f4ed]"
             }`}
           >
-            {label}
+            {label} <span className="ml-1 text-xs opacity-75">{counts[filter]}</span>
           </button>
         ))}
       </div>
@@ -110,7 +136,10 @@ export default function Orders() {
       {error && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <p role="alert">{error}</p>
-          <button type="button" onClick={() => void refresh(true)} className="font-semibold underline">
+          <button type="button" onClick={() => {
+            setLoading(true);
+            void refreshNow();
+          }} className="font-semibold underline">
             Retry
           </button>
         </div>
@@ -123,7 +152,11 @@ export default function Orders() {
           <div className="p-10 text-center">
             <h2 className="font-serif text-xl font-semibold text-[#253b2a]">No orders found</h2>
             <p className="mt-1 text-sm text-[#73796d]">
-              {error ? "Orders could not be loaded. Retry to check again." : "There are no orders in this status."}
+              {error
+                ? "Orders could not be loaded. Retry to check again."
+                : status === "PLACED"
+                  ? "No new orders right now."
+                  : "There are no orders in this status."}
             </p>
           </div>
         ) : (
@@ -197,7 +230,7 @@ export default function Orders() {
           </div>
         </footer>
       </section>
-      <p className="text-xs text-[#858a7e]">New orders refresh automatically every 8 seconds.</p>
+      <p className="text-xs text-[#858a7e]">Orders and status counts refresh automatically every 2 seconds.</p>
     </div>
   );
 }

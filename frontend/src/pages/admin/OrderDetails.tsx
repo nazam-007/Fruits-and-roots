@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useCallback, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import {
   fetchAdminOrder,
@@ -8,6 +8,7 @@ import {
   type AdminOrderDetails as OrderDetailsType,
   type AdminOrderStatus,
 } from "../../services/adminApi";
+import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
 const formatPrice = (amount: number) =>
   `₹${Number(amount).toLocaleString("en-IN")}`;
@@ -20,54 +21,65 @@ const nextStatus: Partial<Record<AdminOrderStatus, "PREPARING" | "READY" | "COMP
 
 export default function AdminOrderDetails() {
   const { orderId } = useParams<{ orderId: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [order, setOrder] = useState<OrderDetailsType | null>(null);
   const [reference, setReference] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const savingRef = useRef(false);
 
-  const refresh = useCallback(async (showLoading = false) => {
+  const refresh = useCallback(async (signal: AbortSignal) => {
     if (!orderId) {
       setError("Invalid order ID.");
       setLoading(false);
       return;
     }
-    if (showLoading) setLoading(true);
+    if (savingRef.current) return;
     try {
-      setOrder(await fetchAdminOrder(orderId));
+      const latest = await fetchAdminOrder(orderId, signal);
+      if (signal.aborted || savingRef.current) return;
+      setOrder(latest);
       setError(null);
     } catch (requestError) {
+      if (signal.aborted) return;
       setError(
         requestError instanceof Error
           ? requestError.message
           : "Unable to load order details.",
       );
     } finally {
-      setLoading(false);
+      if (!signal.aborted) setLoading(false);
     }
   }, [orderId]);
 
-  useEffect(() => {
-    const initialTimeout = window.setTimeout(() => void refresh(true), 0);
-    const intervalId = window.setInterval(() => void refresh(), 7000);
-    return () => {
-      window.clearTimeout(initialTimeout);
-      window.clearInterval(intervalId);
-    };
-  }, [refresh]);
+  const refreshNow = useVisiblePolling(refresh, 2000, orderId);
 
   const changeStatus = async () => {
     if (!order) return;
     const status = nextStatus[order.order_status];
     if (!status || saving) return;
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     setNotice(null);
     try {
-      await updateAdminOrderStatus(order.id, status);
+      const result = await updateAdminOrderStatus(order.id, status);
+      if (status === "COMPLETED") {
+        if (result.orderStatus !== "COMPLETED") {
+          throw new Error("The order was not confirmed as completed.");
+        }
+        const searchParams = new URLSearchParams(location.search);
+        searchParams.set("status", "PLACED");
+        searchParams.delete("offset");
+        navigate(`/admin/orders?${searchParams.toString()}`);
+        return;
+      }
       setNotice(`Order moved to ${status}.`);
-      await refresh();
+      savingRef.current = false;
+      await refreshNow();
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -75,6 +87,7 @@ export default function AdminOrderDetails() {
           : "Unable to update order status.",
       );
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -95,6 +108,7 @@ export default function AdminOrderDetails() {
     ) {
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -110,7 +124,8 @@ export default function AdminOrderDetails() {
           ? "Manual payment marked verified."
           : "Payment claim rejected.",
       );
-      await refresh();
+      savingRef.current = false;
+      await refreshNow();
     } catch (requestError) {
       setError(
         requestError instanceof Error
@@ -118,6 +133,7 @@ export default function AdminOrderDetails() {
           : "Unable to update payment verification.",
       );
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -167,7 +183,10 @@ export default function AdminOrderDetails() {
         </div>
         <button
           type="button"
-          onClick={() => void refresh(true)}
+          onClick={() => {
+            setLoading(true);
+            void refreshNow();
+          }}
           disabled={loading}
           className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[#dfe3d8] bg-white px-4 text-sm font-semibold text-[#31573a] disabled:opacity-50"
         >
@@ -300,7 +319,7 @@ export default function AdminOrderDetails() {
           <span className="tabular-nums">{formatPrice(order.total_amount)}</span>
         </div>
       </section>
-      <p className="text-xs text-[#858a7e]">Order details refresh automatically every 7 seconds.</p>
+      <p className="text-xs text-[#858a7e]">Order details refresh automatically every 2 seconds.</p>
     </div>
   );
 }
