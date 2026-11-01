@@ -18,8 +18,21 @@ const orderItemSchema = z.object({
 
 const quoteSchema = z.object({
   fulfillmentType: z.enum(["PICKUP", "TABLE"]).default("PICKUP"),
+  orderType: z.enum(["TAKEAWAY", "DINE_IN"]).optional(),
   tableNumber: z.string().trim().min(1).max(20).optional(),
   items: z.array(orderItemSchema).min(1).max(50),
+}).superRefine((input, context) => {
+  if (
+    input.orderType === "DINE_IN" &&
+    input.tableNumber &&
+    !/^[A-Za-z0-9]{1,6}$/.test(input.tableNumber)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["tableNumber"],
+      message: "Table numbers must use up to 6 letters or numbers.",
+    });
+  }
 });
 
 const createOrderSchema = quoteSchema.extend({
@@ -238,6 +251,7 @@ function toOrderResponse(row: {
   order_number: string;
   customer_name: string;
   fulfillment_type: "PICKUP" | "TABLE";
+  order_type: "TAKEAWAY" | "DINE_IN";
   table_number: string | null;
   total_amount: number;
   payment_status: string;
@@ -257,6 +271,7 @@ function toOrderResponse(row: {
     orderNumber: row.order_number,
     customerName: row.customer_name,
     fulfillmentType: row.fulfillment_type,
+    orderType: row.order_type,
     tableNumber: row.table_number,
     totalAmount: Number(row.total_amount),
     paymentStatus: row.payment_status,
@@ -270,7 +285,9 @@ function toOrderResponse(row: {
 
 async function loadOrder(orderId: string) {
   const result = await db.query(
-    `    SELECT o.id, o.order_number, o.customer_name, o.fulfillment_type, rt.table_number, o.total_amount,
+    `    SELECT o.id, o.order_number, o.customer_name, o.fulfillment_type,
+            o.order_type, COALESCE(o.table_number, rt.table_number) AS table_number,
+            o.total_amount,
             o.payment_status,
             (SELECT p.payment_source FROM payments p WHERE p.order_id = o.id LIMIT 1) AS payment_source,
             o.order_status, o.created_at,
@@ -298,7 +315,9 @@ async function loadOrder(orderId: string) {
 
 async function loadOrderInTransaction(client: import("pg").PoolClient, key: string) {
   const result = await client.query(
-    `    SELECT o.id, o.order_number, o.customer_name, o.fulfillment_type, rt.table_number, o.total_amount,
+    `    SELECT o.id, o.order_number, o.customer_name, o.fulfillment_type,
+            o.order_type, COALESCE(o.table_number, rt.table_number) AS table_number,
+            o.total_amount,
             o.payment_status,
             (SELECT p.payment_source FROM payments p WHERE p.order_id = o.id LIMIT 1) AS payment_source,
             o.order_status, o.created_at,
@@ -365,10 +384,15 @@ router.post("/orders/quote", limitQuotes, async (req, res) => {
     res.status(400).json({ message: "Check the fulfillment type and order items." });
     return;
   }
-  if (
-    parsed.data.fulfillmentType === "TABLE" &&
-    !parsed.data.tableNumber
-  ) {
+  const orderType =
+    parsed.data.orderType ??
+    (parsed.data.fulfillmentType === "TABLE" ? "DINE_IN" : "TAKEAWAY");
+  const requiresRegisteredTable =
+    parsed.data.orderType === undefined &&
+    parsed.data.fulfillmentType === "TABLE";
+  const tableNumber =
+    orderType === "DINE_IN" ? parsed.data.tableNumber ?? null : null;
+  if (requiresRegisteredTable && !tableNumber) {
     res.status(400).json({ message: "A table number is required for table orders." });
     return;
   }
@@ -379,8 +403,8 @@ router.post("/orders/quote", limitQuotes, async (req, res) => {
 
   try {
     const [table, items] = await Promise.all([
-      parsed.data.fulfillmentType === "TABLE"
-        ? isActiveTable(parsed.data.tableNumber!)
+      requiresRegisteredTable
+        ? isActiveTable(tableNumber!)
         : Promise.resolve(true),
       priceItems(parsed.data.items),
     ]);
@@ -437,6 +461,15 @@ router.post("/orders", limitOrders, async (req, res) => {
     return;
   }
   const input = parsed.data;
+  const orderType =
+    input.orderType ??
+    (input.fulfillmentType === "TABLE" ? "DINE_IN" : "TAKEAWAY");
+  const fulfillmentType =
+    orderType === "DINE_IN" ? "TABLE" : "PICKUP";
+  const tableNumber =
+    orderType === "DINE_IN" ? input.tableNumber ?? null : null;
+  const requiresRegisteredTable =
+    input.orderType === undefined && input.fulfillmentType === "TABLE";
   if (hasDuplicateItems(input.items)) {
     res.status(400).json({ message: "Each product size may only appear once." });
     return;
@@ -451,15 +484,19 @@ router.post("/orders", limitOrders, async (req, res) => {
     return;
   }
 
-  const requestHash = hash(
-    JSON.stringify({
-      customerName: input.customerName,
-      customerPhone: input.customerPhone ?? null,
-      fulfillmentType: input.fulfillmentType,
-      tableNumber: input.tableNumber ?? null,
-      items: input.items,
-    }),
-  );
+  const requestHashInput: Record<string, unknown> = {
+    customerName: input.customerName,
+    customerPhone: input.customerPhone ?? null,
+    fulfillmentType:
+      input.orderType === undefined ? input.fulfillmentType : fulfillmentType,
+    tableNumber:
+      input.orderType === undefined ? input.tableNumber ?? null : tableNumber,
+    items: input.items,
+  };
+  if (input.orderType === "DINE_IN") {
+    requestHashInput.orderType = orderType;
+  }
+  const requestHash = hash(JSON.stringify(requestHashInput));
   const trackingTokenHash = hash(trackingToken);
 
   let client;
@@ -498,8 +535,8 @@ router.post("/orders", limitOrders, async (req, res) => {
     }
 
     let tableId: number | null = null;
-    if (input.fulfillmentType === "TABLE") {
-      if (!input.tableNumber) {
+    if (requiresRegisteredTable) {
+      if (!tableNumber) {
         await client.query("ROLLBACK");
         res.status(400).json({ message: "A table number is required for table orders." });
         return;
@@ -508,7 +545,7 @@ router.post("/orders", limitOrders, async (req, res) => {
         `SELECT id FROM restaurant_tables
          WHERE table_number = $1 AND is_active IS TRUE
          FOR KEY SHARE`,
-        [input.tableNumber],
+        [tableNumber],
       );
       if (!tableResult.rows[0]) {
         await client.query("ROLLBACK");
@@ -560,17 +597,20 @@ router.post("/orders", limitOrders, async (req, res) => {
     const totalAmount = calculateTotal(pricedItems);
     const inserted = await client.query(
       `INSERT INTO orders
-         (customer_name, customer_phone, table_id, fulfillment_type, total_amount,
+         (customer_name, customer_phone, table_id, fulfillment_type,
+          order_type, table_number, total_amount,
           payment_status, order_status, idempotency_key, request_hash,
           tracking_token_hash)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING_PAYMENT', 'PLACED', $6, $7, $8)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING_PAYMENT', 'PLACED', $8, $9, $10)
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING id`,
       [
         input.customerName,
         input.customerPhone || null,
         tableId,
-        input.fulfillmentType,
+        fulfillmentType,
+        orderType,
+        tableNumber,
         totalAmount,
         input.idempotencyKey,
         requestHash,

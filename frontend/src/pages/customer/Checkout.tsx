@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowLeft, ArrowRight, Clock3 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Clock3, ShoppingBag, Utensils } from "lucide-react";
 import { useCart } from "../../context/useCart";
 import { useCheckout } from "../../context/CheckoutContext";
 import { useMenu } from "../../context/MenuContext";
 import { submitOrder } from "../../services/ordersApi";
+import type { OrderType } from "../../services/ordersApi";
 
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
 const IDEMPOTENCY_STORAGE_KEY = "fruits-roots-payment-idempotency";
@@ -59,6 +60,8 @@ export default function Checkout() {
   const [customerPhone, setCustomerPhone] = useState(
     checkoutDetails?.customerPhone ?? "",
   );
+  const [orderType, setOrderType] = useState<OrderType>("TAKEAWAY");
+  const [tableNumber, setTableNumber] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -97,6 +100,15 @@ export default function Checkout() {
       setFormError("Enter a valid phone number or leave it blank.");
       return;
     }
+    const trimmedTableNumber = tableNumber.trim();
+    if (
+      orderType === "DINE_IN" &&
+      trimmedTableNumber &&
+      !/^[A-Za-z0-9]{1,6}$/.test(trimmedTableNumber)
+    ) {
+      setFormError("Enter a table number using up to 6 letters or numbers.");
+      return;
+    }
     if (!cart.length) {
       navigate("/cart", { replace: true });
       return;
@@ -115,7 +127,10 @@ export default function Checkout() {
       const request = {
         customerName: name,
         ...(phone ? { customerPhone: phone } : {}),
-        fulfillmentType: "PICKUP" as const,
+        orderType,
+        ...(orderType === "DINE_IN" && trimmedTableNumber
+          ? { tableNumber: trimmedTableNumber }
+          : {}),
         items: cart.map(({ id, size, quantity }) => ({
           productId: id,
           size,
@@ -164,7 +179,7 @@ export default function Checkout() {
           Checkout
         </h1>
         <p className="mt-2 text-sm leading-6 text-[#73796d] sm:text-base">
-          Complete your order for counter pickup.
+          Complete your order for dine-in or takeaway.
         </p>
       </div>
 
@@ -189,11 +204,87 @@ export default function Checkout() {
               Your details
             </h2>
             <p className="mt-1 text-sm text-[#73796d]">
-              We will call your name when your pickup order is ready.
+              {orderType === "TAKEAWAY"
+                ? "We'll call your name when your order is ready for pickup."
+                : "Your order will be prepared for you to enjoy at the café."}
             </p>
           </div>
 
           <div className="space-y-4">
+            <fieldset>
+              <legend className="mb-2 text-sm font-semibold text-[#394b38]">
+                How would you like your order?
+              </legend>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {([
+                  {
+                    value: "TAKEAWAY",
+                    label: "Takeaway",
+                    description: "Pick up at counter",
+                    Icon: ShoppingBag,
+                  },
+                  {
+                    value: "DINE_IN",
+                    label: "Dine-in",
+                    description: "Enjoy at the café",
+                    Icon: Utensils,
+                  },
+                ] as const).map(({ value, label, description, Icon }) => (
+                  <label key={value} className="relative block cursor-pointer">
+                    <input
+                      type="radio"
+                      name="order-type"
+                      value={value}
+                      checked={orderType === value}
+                      onChange={() => setOrderType(value)}
+                      className="peer sr-only"
+                    />
+                    <span
+                      className={`flex min-h-[88px] items-center gap-3 rounded-2xl border p-4 transition peer-focus-visible:ring-2 peer-focus-visible:ring-[#b56b36] peer-focus-visible:ring-offset-2 ${
+                        orderType === value
+                          ? "border-[#31573a] bg-[#f2f7ee]"
+                          : "border-[#e5e2d6] bg-[#fdfcf9] hover:border-[#9cae92]"
+                      }`}
+                    >
+                      <Icon size={20} className="shrink-0 text-[#31573a]" aria-hidden="true" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block font-semibold text-[#253b2a]">{label}</span>
+                        <span className="mt-1 block text-xs text-[#73796d]">{description}</span>
+                      </span>
+                      {orderType === value && (
+                        <Check size={18} className="shrink-0 text-[#31573a]" aria-hidden="true" />
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            {orderType === "DINE_IN" && (
+              <div>
+                <label
+                  htmlFor="table-number"
+                  className="mb-1.5 block text-sm font-semibold text-[#394b38]"
+                >
+                  Table number <span className="font-normal text-[#858a7e]">(optional)</span>
+                </label>
+                <input
+                  id="table-number"
+                  type="text"
+                  autoComplete="off"
+                  maxLength={6}
+                  value={tableNumber}
+                  onChange={(event) => setTableNumber(event.target.value)}
+                  placeholder="e.g. 5"
+                  aria-describedby="table-number-help"
+                  className="min-h-12 w-full rounded-xl border border-[#e5e2d6] bg-[#fdfcf9] px-4 py-3 text-base text-[#253b2a] outline-none transition placeholder:text-[#9a9e94] focus:border-[#78916c] focus:ring-2 focus:ring-[#31573a]/15 sm:text-sm"
+                />
+                <p id="table-number-help" className="mt-1.5 text-xs text-[#73796d]">
+                  Leave blank if you don't know your table number.
+                </p>
+              </div>
+            )}
+
             <div>
               <label
                 htmlFor="customer-name"

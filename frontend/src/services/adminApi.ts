@@ -19,6 +19,8 @@ export type AdminOrderRow = {
   customer_name: string;
   customer_phone: string | null;
   fulfillment_type: "PICKUP" | "TABLE";
+  order_type?: "TAKEAWAY" | "DINE_IN";
+  table_number?: string | null;
   total_amount: number;
   payment_status: AdminPaymentStatus;
   order_status: AdminOrderStatus;

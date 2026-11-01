@@ -157,6 +157,52 @@ test("checkout form supports optional phone without submitting an order", async 
   ).toBeEnabled();
 });
 
+test("checkout submits Takeaway by default and optional Dine-in table number", async ({
+  page,
+  request,
+}) => {
+  const products = await loadMenu(request);
+  const product = products.find((item) => item.available && item.variants.length);
+  expect(product, "menu should contain an available product").toBeTruthy();
+  await seedCart(page, product!);
+
+  const submittedOrders: Array<Record<string, unknown>> = [];
+  await page.route("**/api/orders", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    submittedOrders.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ message: "Order intercepted for this test." }),
+    });
+  });
+
+  await page.goto("/checkout");
+  await page.getByLabel("Your name").fill("Test Customer");
+  await expect(page.getByRole("radio", { name: /Takeaway/ })).toBeChecked();
+  await page.getByRole("button", { name: "Continue to Payment" }).first().click();
+  await expect.poll(() => submittedOrders.length).toBe(1);
+  expect(submittedOrders[0]).toMatchObject({ orderType: "TAKEAWAY" });
+  expect(submittedOrders[0]).not.toHaveProperty("tableNumber");
+
+  await page.getByText("Dine-in", { exact: true }).click();
+  await page.getByLabel(/Table number/).fill("A2");
+  await page.getByRole("button", { name: "Continue to Payment" }).first().click();
+  await expect.poll(() => submittedOrders.length).toBe(2);
+  expect(submittedOrders[1]).toMatchObject({
+    orderType: "DINE_IN",
+    tableNumber: "A2",
+  });
+
+  await page.getByLabel(/Table number/).fill("A-2");
+  await page.getByRole("button", { name: "Continue to Payment" }).first().click();
+  await expect(page.getByRole("alert")).toContainText("up to 6 letters or numbers");
+  expect(submittedOrders).toHaveLength(2);
+});
+
 test("admin login is reachable and protected admin APIs reject anonymous requests", async ({
   page,
   request,

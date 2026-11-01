@@ -13,6 +13,15 @@ import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 const formatPrice = (amount: number) =>
   `₹${Number(amount).toLocaleString("en-IN")}`;
 
+function formatFulfillment(order: OrderDetailsType) {
+  const orderType =
+    order.order_type ??
+    (order.fulfillment_type === "TABLE" ? "DINE_IN" : "TAKEAWAY");
+  return orderType === "DINE_IN"
+    ? `Dine-in${order.table_number ? ` · Table ${order.table_number}` : ""}`
+    : "Takeaway";
+}
+
 const nextStatus: Partial<Record<AdminOrderStatus, "PREPARING" | "READY" | "COMPLETED">> = {
   PLACED: "PREPARING",
   PREPARING: "READY",
@@ -204,7 +213,7 @@ export default function AdminOrderDetails() {
           <dl className="mt-4 space-y-3 text-sm">
             <div className="flex justify-between gap-3"><dt className="shrink-0 text-[#73796d]">Name</dt><dd className="min-w-0 break-all text-right font-medium">{order.customer_name}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Phone</dt><dd className="text-right font-medium">{order.customer_phone || "Not provided"}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Pickup type</dt><dd className="font-medium">{order.fulfillment_type === "PICKUP" ? "Counter pickup" : "Table"}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Order type</dt><dd className="font-medium">{formatFulfillment(order)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Placed</dt><dd className="text-right font-medium">{new Date(order.created_at).toLocaleString()}</dd></div>
           </dl>
         </section>
