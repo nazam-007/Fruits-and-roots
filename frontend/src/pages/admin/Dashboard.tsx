@@ -4,6 +4,7 @@ import { Activity, CheckCircle2, ClipboardList, Clock3, IndianRupee, PackageChec
 import { fetchDashboard, type AdminDashboardData } from "../../services/adminApi";
 import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
+const PAGE_SIZE = 25;
 const formatPrice = (amount: number) =>
   `₹${Number(amount).toLocaleString("en-IN")}`;
 
@@ -19,15 +20,28 @@ const cards = [
 
 export default function Dashboard() {
   const [data, setData] = useState<AdminDashboardData | null>(null);
+  const [orders, setOrders] = useState<AdminOrderRow[]>([]);
+  const [ordersTotal, setOrdersTotal] = useState(0);
+  const [ordersOffset, setOrdersOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestInFlightRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async (signal: AbortSignal) => {
     try {
       const latest = await fetchDashboard(signal);
       if (signal.aborted) return;
       setData(latest);
+      setOrders(orderPage.items);
+      setOrdersTotal(orderPage.total);
       setError(null);
+      if (ordersOffset > 0 && ordersOffset >= orderPage.total) {
+        setOrdersOffset(
+          Math.max(0, Math.ceil(orderPage.total / PAGE_SIZE) - 1) * PAGE_SIZE,
+        );
+      }
     } catch (requestError) {
       if (signal.aborted) return;
       setError(
@@ -36,11 +50,18 @@ export default function Dashboard() {
           : "Unable to load dashboard data.",
       );
     } finally {
-      if (!signal.aborted) setLoading(false);
+      if (requestId === requestIdRef.current) {
+      controllerRef.current = null;
+      requestInFlightRef.current = false;
+      setLoading(false);
+      }
     }
-  }, []);
+  }, [ordersOffset]);
 
   const refreshNow = useVisiblePolling(refresh, 2000);
+
+  const start = ordersTotal === 0 ? 0 : ordersOffset + 1;
+  const end = Math.min(ordersOffset + PAGE_SIZE, ordersTotal);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -122,10 +143,10 @@ export default function Dashboard() {
         <div className="flex items-center justify-between border-b border-[#eeece4] px-5 py-4">
           <div>
             <h2 className="font-serif text-xl font-semibold text-[#253b2a]">
-              Recent orders
+              All orders
             </h2>
             <p className="mt-1 text-xs text-[#73796d]">
-              Automatically refreshes while this page is open.
+              All orders, with automatic updates while this page is visible.
             </p>
           </div>
           <Link
@@ -139,7 +160,7 @@ export default function Dashboard() {
           <p role="status" className="p-6 text-sm text-[#73796d]">
             Loading recent orders...
           </p>
-        ) : data?.recentOrders.length ? (
+        ) : orders.length ? (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[700px] text-left text-sm">
               <thead className="bg-[#f8f8f2] text-xs uppercase tracking-wide text-[#73796d]">
@@ -153,7 +174,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#eeece4]">
-                {data.recentOrders.map((order) => (
+                {orders.map((order) => (
                   <tr key={order.id} className="hover:bg-[#fdfcf9]">
                     <td className="px-5 py-3">
                       <Link
@@ -188,6 +209,29 @@ export default function Dashboard() {
             {error ? "Recent orders are temporarily unavailable." : "No orders yet."}
           </p>
         )}
+        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#eeece4] px-4 py-3 text-sm text-[#73796d]">
+          <span>{start}–{end} of {ordersTotal}</span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setOrdersOffset(Math.max(0, ordersOffset - PAGE_SIZE))}
+              disabled={ordersOffset === 0 || loading}
+              aria-label="Previous orders page"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#dfe3d8] disabled:opacity-40"
+            >
+              <ChevronLeft size={17} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setOrdersOffset(ordersOffset + PAGE_SIZE)}
+              disabled={ordersOffset + PAGE_SIZE >= ordersTotal || loading}
+              aria-label="Next orders page"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#dfe3d8] disabled:opacity-40"
+            >
+              <ChevronRight size={17} aria-hidden="true" />
+            </button>
+          </div>
+        </footer>
       </section>
     </div>
   );

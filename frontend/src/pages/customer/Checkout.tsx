@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Clock3 } from "lucide-react";
-import { useCart } from "../../context/CartContext";
+import { useCart } from "../../context/useCart";
 import { useCheckout } from "../../context/CheckoutContext";
 import { useMenu } from "../../context/MenuContext";
 import { submitOrder } from "../../services/ordersApi";

@@ -26,6 +26,11 @@ export type AdminOrderRow = {
   payment_source: AdminPaymentSource;
 };
 
+export type AdminOrderStatusCounts = Record<
+  "ALL" | AdminOrderStatus,
+  number
+>;
+
 export type AdminOrderDetails = AdminOrderRow & {
   recorded_payment_status: AdminPaymentStatus | null;
   transaction_reference: string | null;
@@ -54,7 +59,6 @@ export type AdminDashboardData = {
     verified_revenue_today: number;
     demo_revenue_today: number;
   };
-  recentOrders: AdminOrderRow[];
   demoPaymentsEnabled: boolean;
 };
 
@@ -83,11 +87,13 @@ export type AdminMenuProductInput = {
 
 export class AdminApiError extends Error {
   status: number;
+  endpoint: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, endpoint: string) {
     super(message);
     this.name = "AdminApiError";
     this.status = status;
+    this.endpoint = endpoint;
   }
 }
 
@@ -107,6 +113,17 @@ async function request<T>(
     ? null
     : await response.json().catch(() => null);
   if (!response.ok) {
+    const endpoint = `${init.method ?? "GET"} /api/admin${path}`;
+    if (import.meta.env.DEV) {
+      console.error("Admin API request failed", {
+        endpoint,
+        status: response.status,
+        backendMessage:
+          typeof data?.message === "string" ? data.message : undefined,
+        backendCode:
+          typeof data?.code === "string" ? data.code : undefined,
+      });
+    }
     if (response.status === 401 && path !== "/auth/login") {
       window.dispatchEvent(new Event("admin-session-expired"));
     }
@@ -115,6 +132,7 @@ async function request<T>(
         ? data.message
         : "The admin request could not be completed.",
       response.status,
+      endpoint,
     );
   }
   return data as T;
