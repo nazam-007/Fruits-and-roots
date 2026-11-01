@@ -35,8 +35,6 @@ const orderProgress: OrderStatus[] = [
   "READY",
   "COMPLETED",
 ];
-const terminalOrderStatuses: OrderStatus[] = ["COMPLETED", "CANCELLED"];
-
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
 const pickupMessage =
   "Your order has been received. Please wait while restaurant staff verify your payment and prepare your items. We will call your name when your order is ready.";

@@ -5,7 +5,6 @@ import {
   fetchAdminOrders,
   type AdminOrderRow,
   type AdminOrderStatus,
-  type AdminOrderStatusCounts,
 } from "../../services/adminApi";
 import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
@@ -35,7 +34,6 @@ export default function Orders() {
     : "PLACED";
   const [items, setItems] = useState<AdminOrderRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [statusCounts, setStatusCounts] = useState<AdminOrderStatusCounts | null>(null);
   const [offset, setOffset] = useState(0);
   const [counts, setCounts] = useState<Record<"ALL" | AdminOrderStatus, number>>({
     ALL: 0,
