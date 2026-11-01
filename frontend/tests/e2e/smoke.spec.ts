@@ -246,6 +246,7 @@ test("dashboard auto-refreshes all-time order count using mocked responses", asy
   page,
 }) => {
   let dashboardRequests = 0;
+  let allOrders = 31;
   await page.route("**/api/admin/auth/session", async (route) => {
     await route.fulfill({
       status: 200,
@@ -255,13 +256,84 @@ test("dashboard auto-refreshes all-time order count using mocked responses", asy
   });
   await page.route("**/api/admin/dashboard", async (route) => {
     dashboardRequests += 1;
-    const allOrders = dashboardRequests > 1 ? 9 : 8;
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
         summary: {
-          all_orders: allOrders,
+          total_orders: allOrders,
+          total_orders_today: 1,
+          new_orders: 0,
+          preparing_orders: 0,
+          ready_orders: 0,
+          completed_orders: 1,
+          verified_revenue_today: 0,
+          demo_revenue_today: 90,
+        },
+        demoPaymentsEnabled: true,
+      }),
+    });
+  });
+  await page.route("**/api/admin/orders?*", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        items: [{
+          id: "historical-order",
+          order_number: "HIST-ORDER",
+          customer_name: "Historical customer",
+          customer_phone: null,
+          fulfillment_type: "PICKUP",
+          total_amount: 250,
+          payment_status: "PAID",
+          order_status: "CANCELLED",
+          created_at: "2025-01-01T10:00:00.000Z",
+          payment_source: null,
+        }],
+        total: allOrders,
+        limit: 25,
+        offset: 0,
+        statusCounts: {
+          ALL: 0,
+          PLACED: 0,
+          PREPARING: 0,
+          READY: 0,
+          COMPLETED: 0,
+          CANCELLED: 0,
+        },
+      }),
+    });
+  });
+
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  const allOrdersCard = page.locator("article").filter({ hasText: "All orders" }).first();
+  await expect(allOrdersCard.locator("p")).toHaveText("31");
+  await expect(page.getByText("1–1 of 31")).toBeVisible();
+  const todayOrdersCard = page.locator("article").filter({ hasText: "Orders today" }).first();
+  await expect(todayOrdersCard).toContainText("1");
+  allOrders = 32;
+  await expect(allOrdersCard.locator("p")).toHaveText("32", { timeout: 5_000 });
+  expect(dashboardRequests).toBeGreaterThanOrEqual(2);
+});
+
+test("dashboard does not show zero when the all-time count is missing", async ({
+  page,
+}) => {
+  await page.route("**/api/admin/auth/session", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ adminId: "e2e-admin" }),
+    });
+  });
+  await page.route("**/api/admin/dashboard", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        summary: {
           total_orders_today: 1,
           new_orders: 0,
           preparing_orders: 0,
@@ -296,11 +368,12 @@ test("dashboard auto-refreshes all-time order count using mocked responses", asy
   });
 
   await page.goto("/admin");
-  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText(
+    "Dashboard response is missing the all-time order count.",
+  );
   const allOrdersCard = page.locator("article").filter({ hasText: "All orders" }).first();
-  await expect(allOrdersCard).toContainText("8");
-  await expect(allOrdersCard).toContainText("9", { timeout: 5_000 });
-  expect(dashboardRequests).toBeGreaterThanOrEqual(2);
+  await expect(allOrdersCard).toContainText("—");
+  await expect(allOrdersCard).not.toContainText("0");
 });
 
 test("security headers are set and unapproved origins receive no CORS grant", async ({
