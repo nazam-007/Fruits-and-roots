@@ -20,6 +20,7 @@ import {
   AdminApiError,
   createAdminCategory,
   createAdminMenuProduct,
+  deleteAdminMenuProduct,
   deleteAdminCategory,
   fetchAdminCategories,
   fetchAdminMenu,
@@ -108,7 +109,9 @@ export default function MenuManagement() {
   const [createCategoryForForm, setCreateCategoryForForm] = useState(false);
   const [editingCategory, setEditingCategory] = useState<AdminCategory | null>(null);
   const [categoryBusy, setCategoryBusy] = useState(false);
+  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
   const [editing, setEditing] = useState<AdminMenuProduct | null>(null);
+  const [deletingProduct, setDeletingProduct] = useState<AdminMenuProduct | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [largePriceManual, setLargePriceManual] = useState(false);
   const [largePriceEnabled, setLargePriceEnabled] = useState(true);
@@ -193,6 +196,7 @@ export default function MenuManagement() {
       setCategories((current) =>
         [...current, created].sort((left, right) => left.sortOrder - right.sortOrder),
       );
+      setCategoriesExpanded(true);
       setCategoryFilter(created.name);
       if (createCategoryForForm) {
         setForm((current) => ({ ...current, category: created.name }));
@@ -440,6 +444,31 @@ export default function MenuManagement() {
     }
   };
 
+  const deleteProduct = async (product: AdminMenuProduct) => {
+    if (busyProductId) return;
+    setBusyProductId(product.id);
+    setError(null);
+    try {
+      const result = await deleteAdminMenuProduct(product.id);
+      setProducts((current) => {
+        if (result.deleted) return current.filter((item) => item.id !== product.id);
+        const updated = current.map((item) =>
+          item.id === product.id ? { ...item, archived: true } : item,
+        );
+        return showArchived
+          ? updated
+          : updated.filter((item) => item.id !== product.id);
+      });
+      setDeletingProduct(null);
+      setNotice(result.message);
+      await refreshMenu(true);
+    } catch (deleteError) {
+      setError(requestMessage(deleteError));
+    } finally {
+      setBusyProductId(null);
+    }
+  };
+
   const updateForm = <K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
@@ -469,15 +498,30 @@ export default function MenuManagement() {
         aria-labelledby="category-management-title"
         className="rounded-2xl border border-[#e7e4d8] bg-white p-4 shadow-sm sm:p-5"
       >
-        <div className="mb-3">
-          <h2 id="category-management-title" className="font-semibold text-[#354632]">
-            Categories
-          </h2>
-          <p className="mt-1 text-xs text-gray-500">
-            Change names, adjust display order, or delete categories with no assigned products.
-          </p>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 id="category-management-title" className="font-semibold text-[#354632]">
+              Categories
+            </h2>
+            <p className="mt-1 text-xs text-gray-500">
+              Change names, adjust display order, or delete categories with no assigned products.
+            </p>
+          </div>
+          <button
+            type="button"
+            aria-label={`${categoriesExpanded ? "Collapse" : "Expand"} categories`}
+            aria-expanded={categoriesExpanded}
+            aria-controls="admin-category-list"
+            onClick={() => setCategoriesExpanded((expanded) => !expanded)}
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-[#354632] hover:bg-[#f3f5ef] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#354632]"
+          >
+            {categories.length} {categories.length === 1 ? "category" : "categories"}
+            {categoriesExpanded
+              ? <ChevronUp size={16} aria-hidden="true" />
+              : <ChevronDown size={16} aria-hidden="true" />}
+          </button>
         </div>
-        <ol className="space-y-2">
+        <ol id="admin-category-list" hidden={!categoriesExpanded} className="space-y-2">
           {categories.map((category, index) => (
             <li
               key={category.id}
@@ -705,6 +749,19 @@ export default function MenuManagement() {
                       {busy ? <LoaderCircle size={15} className="animate-spin" /> : product.archived ? <Undo2 size={15} /> : <Archive size={15} />}
                       {product.archived ? "Restore" : "Archive"}
                     </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setError(null);
+                        setDeletingProduct(product);
+                      }}
+                      className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-red-200 px-2.5 text-sm font-semibold text-red-800 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      <Trash2 size={15} aria-hidden="true" />
+                      Delete
+                    </button>
                   </div>
                 </div>
               </article>
@@ -815,6 +872,49 @@ export default function MenuManagement() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {deletingProduct && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-5">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-product-title"
+            aria-describedby="delete-product-message"
+            className="w-full max-w-md space-y-4 rounded-t-2xl bg-white p-5 sm:rounded-2xl sm:p-6"
+          >
+            <div>
+              <h2 id="delete-product-title" className="text-xl font-bold text-[#354632]">
+                Delete {deletingProduct.name}?
+              </h2>
+              <p id="delete-product-message" className="mt-2 text-sm text-gray-600">
+                Are you sure you want to delete this item? It will be removed from your menu.
+                If it appears in an order, it will be archived instead so historical order details are retained.
+              </p>
+            </div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                disabled={busyProductId === deletingProduct.id}
+                onClick={() => setDeletingProduct(null)}
+                className="min-h-11 rounded-xl border border-gray-200 px-4 font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busyProductId === deletingProduct.id}
+                onClick={() => void deleteProduct(deletingProduct)}
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-red-700 px-4 font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busyProductId === deletingProduct.id && (
+                  <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />
+                )}
+                {busyProductId === deletingProduct.id ? "Deleting..." : "Delete Item"}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </section>

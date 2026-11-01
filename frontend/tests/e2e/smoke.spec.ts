@@ -135,6 +135,41 @@ test("customer category filters use visible database menu products", async ({ pa
   await expectNoHorizontalOverflow(page);
 });
 
+test("customer menu refreshes immediately after a catalog event", async ({ page }) => {
+  const product: MenuProduct = {
+    id: "catalog-event-item",
+    categoryId: "00000000-0000-4000-8000-000000000001",
+    name: "Seasonal Citrus",
+    category: "Juices",
+    available: true,
+    availabilityStatus: "AVAILABLE",
+    variants: [{ size: "Regular", price: 120 }],
+  };
+  let productAvailable = true;
+  let releaseCatalogEvent!: () => void;
+  const catalogEventReady = new Promise<void>((resolve) => {
+    releaseCatalogEvent = resolve;
+  });
+  await page.route(menuEndpoint, async (route) => {
+    await route.fulfill({ json: productAvailable ? [product] : [] });
+  });
+  await page.route("**/api/menu/events", async (route) => {
+    await catalogEventReady;
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+      body: "retry: 10000\n\nevent: catalog-changed\ndata: {}\n\n",
+    });
+  });
+
+  await page.goto("/menu");
+  const productLink = page.getByRole("link", { name: "View Seasonal Citrus" });
+  await expect(productLink).toBeVisible();
+  productAvailable = false;
+  releaseCatalogEvent();
+  await expect(productLink).toHaveCount(0, { timeout: 2_000 });
+});
+
 test("admin category creation is database-backed and assignable to a product", async ({
   page,
 }) => {
@@ -159,7 +194,34 @@ test("admin category creation is database-backed and assignable to a product", a
       return;
     }
     if (url.pathname === "/api/admin/menu" && request.method() === "GET") {
-      await route.fulfill({ json: products });
+      const includeArchived = url.searchParams.get("includeArchived") === "true";
+      await route.fulfill({
+        json: products.filter((product) => includeArchived || product.archived !== true),
+      });
+      return;
+    }
+    if (/^\/api\/admin\/menu\/[^/]+$/.test(url.pathname) && request.method() === "DELETE") {
+      const productId = url.pathname.split("/").at(-1);
+      const product = products.find((item) => item.id === productId);
+      if (!product) {
+        await route.fulfill({ status: 404, json: { message: "Menu item not found." } });
+        return;
+      }
+      if (product.orderCount) {
+        product.archived = true;
+        await route.fulfill({
+          json: {
+            deleted: false,
+            archived: true,
+            message: `${product.name} was removed from the active menu. Historical orders have been retained.`,
+          },
+        });
+        return;
+      }
+      products.splice(products.indexOf(product), 1);
+      await route.fulfill({
+        json: { deleted: true, archived: false, message: `${product.name} was deleted.` },
+      });
       return;
     }
     if (url.pathname === "/api/admin/categories" && request.method() === "POST") {
@@ -240,10 +302,11 @@ test("admin category creation is database-backed and assignable to a product", a
       const input = request.postDataJSON() as Record<string, unknown>;
       const category = categories.find((item) => item.name === input.category);
       const product = {
-        id: "food-test-product",
+        id: String(input.name).toLowerCase().replace(/[^a-z0-9]+/g, "-"),
         categoryId: category?.id,
         ...input,
         archived: false,
+        orderCount: input.name === "Seasonal Bowl" ? 1 : 0,
         variants: [
           { size: "Regular", price: input.regularPrice },
           ...(input.largePrice === null
@@ -260,6 +323,10 @@ test("admin category creation is database-backed and assignable to a product", a
 
   await page.goto("/admin/menu");
   await expect(page.getByRole("heading", { name: "Menu Management" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Expand categories" })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  );
   await page.getByRole("button", { name: "Add Category" }).click();
   await expect(page.evaluate(() =>
     document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -268,11 +335,19 @@ test("admin category creation is database-backed and assignable to a product", a
   await page.getByRole("button", { name: "Create Category" }).click();
   await expect(page.getByRole("status")).toContainText('Category "Food" created.');
   await expect(page.locator("select").first()).toHaveValue("Food");
+  await expect(page.getByRole("button", { name: "Collapse categories" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
 
   const categoryList = page.getByRole("region", { name: "Categories" }).locator("li");
+  await page.getByRole("button", { name: "Collapse categories" }).click();
+  await expect(page.locator("#admin-category-list")).toBeHidden();
+  await page.getByRole("button", { name: "Expand categories" }).click();
   await page.getByRole("button", { name: "Move Food up" }).click();
   await expect(categoryList.first()).toContainText("Food");
   await page.reload();
+  await page.getByRole("button", { name: "Expand categories" }).click();
   await expect(page.getByRole("button", { name: "Move Food up" })).toBeDisabled();
 
   await page.getByRole("button", { name: "Add Category" }).click();
@@ -309,6 +384,40 @@ test("admin category creation is database-backed and assignable to a product", a
   await expect(
     page.locator("article").filter({ hasText: "Seasonal Bowl" }).getByText("Healthy Food", { exact: true }),
   ).toBeVisible();
+
+  const productCard = page.locator("article").filter({ hasText: "Seasonal Bowl" });
+  await expect(productCard.getByRole("button", { name: "Edit" })).toBeVisible();
+  await expect(productCard.getByRole("button", { name: "Archive" })).toBeVisible();
+  await expect(productCard.getByRole("button", { name: "Delete" })).toBeVisible();
+  await productCard.getByRole("button", { name: "Delete" }).click();
+  const deleteDialog = page.getByRole("dialog", { name: "Delete Seasonal Bowl?" });
+  await expect(deleteDialog).toContainText("historical order details are retained");
+  await deleteDialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(productCard).toBeVisible();
+
+  await productCard.getByRole("button", { name: "Delete" }).click();
+  await page.getByRole("dialog", { name: "Delete Seasonal Bowl?" })
+    .getByRole("button", { name: "Delete Item" }).click();
+  await expect(page.getByRole("status")).toContainText("Historical orders have been retained.");
+  await expect(page.locator("article").filter({ hasText: "Seasonal Bowl" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Move Healthy Food up" })).toBeVisible();
+  await page.getByLabel("Include archived items").check();
+  await expect(page.locator("article").filter({ hasText: "Seasonal Bowl" })).toContainText("Archived");
+
+  await page.getByLabel("Include archived items").uncheck();
+  await page.getByRole("button", { name: "Add New Item" }).click();
+  const secondEditor = page.getByRole("dialog", { name: "Add a menu item" });
+  await secondEditor.getByLabel("Product name *").fill("Unordered Juice");
+  await secondEditor.getByLabel("Regular price (₹) *").fill("95");
+  await secondEditor.getByRole("button", { name: "Add Item" }).click();
+  const unorderedCard = page.locator("article").filter({ hasText: "Unordered Juice" });
+  await expect(unorderedCard).toBeVisible();
+  await unorderedCard.getByRole("button", { name: "Delete" }).click();
+  await page.getByRole("dialog", { name: "Delete Unordered Juice?" })
+    .getByRole("button", { name: "Delete Item" }).click();
+  await expect(page.getByRole("status")).toContainText("Unordered Juice was deleted.");
+  await expect(unorderedCard).toHaveCount(0);
+
   await page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("region", { name: "Categories" }).getByRole("listitem")
     .filter({ hasText: "Healthy Food" }).getByRole("button", { name: "Delete" }).click();
@@ -318,6 +427,7 @@ test("admin category creation is database-backed and assignable to a product", a
   await page.getByRole("region", { name: "Categories" }).getByRole("listitem")
     .filter({ hasText: "Drinks" }).getByRole("button", { name: "Delete" }).click();
   await expect(page.getByRole("region", { name: "Categories" }).getByText("Drinks")).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
   await expectNoHorizontalOverflow(page);
 });
 
