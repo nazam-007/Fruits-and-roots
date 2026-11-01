@@ -75,6 +75,135 @@ test("customer menu product imagery loads successfully", async ({ page }) => {
   }).toBeGreaterThan(0);
 });
 
+test("customer category filters use visible database menu products", async ({ page }) => {
+  const drink: MenuProduct = {
+    id: "drink-item",
+    name: "Fresh Juice",
+    category: "Drinks",
+    available: true,
+    availabilityStatus: "AVAILABLE",
+    variants: [{ size: "Regular", price: 100 }],
+  };
+  const food: MenuProduct = {
+    id: "food-item",
+    name: "Seasonal Bowl",
+    category: "Food",
+    available: true,
+    availabilityStatus: "AVAILABLE",
+    variants: [{ size: "Regular", price: 150 }],
+  };
+  let foodAdded = false;
+  await page.route(menuEndpoint, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(foodAdded ? [drink, food] : [drink]),
+    });
+  });
+
+  await page.goto("/menu");
+  await expect(page.getByRole("button", { name: "All Items" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Drinks", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Food", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Liquid Therapy", exact: true })).toHaveCount(0);
+
+  foodAdded = true;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(page.getByRole("button", { name: "Food", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Food", exact: true }).click();
+  await expect(page.getByRole("link", { name: "View Seasonal Bowl" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "View Fresh Juice" })).toHaveCount(0);
+});
+
+test("admin category creation is database-backed and assignable to a product", async ({
+  page,
+}) => {
+  const categories = [{ id: "category-drinks", name: "Drinks" }];
+  const products: Array<Record<string, unknown>> = [];
+  await page.route(menuEndpoint, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+  await page.route("**/api/admin/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/admin/auth/session" && request.method() === "GET") {
+      await route.fulfill({ json: { adminId: "test-admin" } });
+      return;
+    }
+    if (url.pathname === "/api/admin/categories" && request.method() === "GET") {
+      await route.fulfill({ json: categories });
+      return;
+    }
+    if (url.pathname === "/api/admin/menu" && request.method() === "GET") {
+      await route.fulfill({ json: products });
+      return;
+    }
+    if (url.pathname === "/api/admin/categories" && request.method() === "POST") {
+      const { name } = request.postDataJSON() as { name: string };
+      if (categories.some((category) => category.name.toLowerCase() === name.toLowerCase())) {
+        await route.fulfill({
+          status: 409,
+          json: { message: "A category with this name already exists." },
+        });
+        return;
+      }
+      const category = { id: `category-${name.toLowerCase()}`, name };
+      categories.push(category);
+      await route.fulfill({ status: 201, json: category });
+      return;
+    }
+    if (url.pathname === "/api/admin/menu" && request.method() === "POST") {
+      const input = request.postDataJSON() as Record<string, unknown>;
+      const product = {
+        id: "food-test-product",
+        ...input,
+        archived: false,
+        variants: [
+          { size: "Regular", price: input.regularPrice },
+          ...(input.largePrice === null
+            ? []
+            : [{ size: "Large", price: input.largePrice }]),
+        ],
+      };
+      products.push(product);
+      await route.fulfill({ status: 201, json: product });
+      return;
+    }
+    await route.fulfill({ status: 404, json: { message: "Not mocked." } });
+  });
+
+  await page.goto("/admin/menu");
+  await expect(page.getByRole("heading", { name: "Menu Management" })).toBeVisible();
+  await page.getByRole("button", { name: "Add Category" }).click();
+  await expect(page.evaluate(() =>
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+  )).resolves.toBeTruthy();
+  await page.getByLabel("Category name *").fill("  Food  ");
+  await page.getByRole("button", { name: "Create Category" }).click();
+  await expect(page.getByRole("status")).toContainText('Category "Food" created.');
+  await expect(page.locator("select").first()).toHaveValue("Food");
+
+  await page.getByRole("button", { name: "Add Category" }).click();
+  await page.getByLabel("Category name *").fill("fOoD");
+  await page.getByRole("button", { name: "Create Category" }).click();
+  await expect(page.getByRole("alert")).toContainText("already exists");
+
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Add New Item" }).click();
+  const editor = page.getByRole("dialog", { name: "Add a menu item" });
+  await expect(page.evaluate(() =>
+    document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+  )).resolves.toBeTruthy();
+  await expect(editor.getByLabel("Category *")).toHaveValue("Food");
+  await editor.getByLabel("Product name *").fill("Seasonal Bowl");
+  await editor.getByLabel("Regular price (₹) *").fill("150");
+  await editor.getByRole("button", { name: "Add Item" }).click();
+  await expect(page.getByText("Seasonal Bowl", { exact: true })).toBeVisible();
+  await expect(
+    page.locator("article").filter({ hasText: "Seasonal Bowl" }).getByText("Food", { exact: true }),
+  ).toBeVisible();
+});
+
 test("menu product prices match the public API and unavailable items cannot be added", async ({
   page,
   request,

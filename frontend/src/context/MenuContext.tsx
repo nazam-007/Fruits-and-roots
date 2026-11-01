@@ -33,8 +33,11 @@ export function MenuProvider({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const hasLoadedMenu = useRef(false);
+  const requestInFlight = useRef(false);
 
   const refreshMenu = useCallback(async (quiet = false) => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     if (!quiet) setLoading(true);
     setError(null);
 
@@ -47,6 +50,7 @@ export function MenuProvider({
         setError("Unable to load the menu. Please try again.");
       }
     } finally {
+      requestInFlight.current = false;
       setLoading(false);
     }
   }, []);
