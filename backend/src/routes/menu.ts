@@ -10,7 +10,7 @@ router.get("/", async (_req, res) => {
       SELECT
         p.id,
         p.name,
-        p.category,
+        c.name AS category,
         p.image_url,
         p.availability_status,
         p.description,
@@ -38,6 +38,8 @@ router.get("/", async (_req, res) => {
           '[]'::json
         ) AS variants
       FROM products p
+      JOIN categories c
+        ON c.id = p.category_id
       LEFT JOIN product_variants v
         ON p.id = v.product_id
       WHERE p.archived_at IS NULL

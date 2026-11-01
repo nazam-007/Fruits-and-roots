@@ -10,12 +10,14 @@ import {
   Star,
   Undo2,
 } from "lucide-react";
-import { categories as defaultCategories, calculateLargePrice } from "../../data/menu";
+import { calculateLargePrice } from "../../data/menu";
 import { getMenuItemImage } from "../../data/menuImages";
 import { useMenu } from "../../context/MenuContext";
 import {
   AdminApiError,
+  createAdminCategory,
   createAdminMenuProduct,
+  fetchAdminCategories,
   fetchAdminMenu,
   updateAdminMenuArchive,
   updateAdminMenuProduct,
@@ -23,6 +25,7 @@ import {
   uploadAdminMenuImage,
   type AdminMenuProduct,
   type AdminMenuProductInput,
+  type AdminCategory,
 } from "../../services/adminApi";
 
 type Status = AdminMenuProduct["availabilityStatus"];
@@ -83,6 +86,7 @@ function productInput(product: AdminMenuProduct): FormState {
 export default function MenuManagement() {
   const { refreshMenu } = useMenu();
   const [products, setProducts] = useState<AdminMenuProduct[]>([]);
+  const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -91,6 +95,11 @@ export default function MenuManagement() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [showArchived, setShowArchived] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [categoryName, setCategoryName] = useState("");
+  const [categorySaving, setCategorySaving] = useState(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [createCategoryForForm, setCreateCategoryForForm] = useState(false);
   const [editing, setEditing] = useState<AdminMenuProduct | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [largePriceManual, setLargePriceManual] = useState(false);
@@ -114,7 +123,12 @@ export default function MenuManagement() {
   }, []);
 
   useEffect(() => {
-    const initialLoad = window.setTimeout(() => void loadProducts(false), 0);
+    const initialLoad = window.setTimeout(() => {
+      void loadProducts(false);
+      void fetchAdminCategories()
+        .then(setCategories)
+        .catch((loadError: unknown) => setError(requestMessage(loadError)));
+    }, 0);
     return () => window.clearTimeout(initialLoad);
   }, [loadProducts]);
 
@@ -124,9 +138,9 @@ export default function MenuManagement() {
     };
   }, [imagePreview]);
 
-  const categories = useMemo(
-    () => [...new Set([...defaultCategories, ...products.map((product) => product.category)])].sort(),
-    [products],
+  const categoryNames = useMemo(
+    () => categories.map((category) => category.name),
+    [categories],
   );
   const visibleProducts = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -140,7 +154,13 @@ export default function MenuManagement() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ ...emptyForm, category: categories[0] ?? "" });
+    setForm({
+      ...emptyForm,
+      category:
+        categoryFilter !== "ALL" && categoryNames.includes(categoryFilter)
+          ? categoryFilter
+          : categoryNames[0] ?? "",
+    });
     setLargePriceManual(false);
     setLargePriceEnabled(true);
     setImageFile(null);
@@ -148,6 +168,45 @@ export default function MenuManagement() {
     setError(null);
     setNotice(null);
     setEditorOpen(true);
+  };
+
+  const handleCreateCategory = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = categoryName.trim();
+    if (!name) {
+      setCategoryError("Enter a category name.");
+      return;
+    }
+
+    setCategorySaving(true);
+    setCategoryError(null);
+    try {
+      const created = await createAdminCategory(name);
+      setCategories((current) =>
+        [...current, created].sort((left, right) =>
+          left.name.localeCompare(right.name),
+        ),
+      );
+      setCategoryFilter(created.name);
+      if (createCategoryForForm) {
+        setForm((current) => ({ ...current, category: created.name }));
+      }
+      setCategoryName("");
+      setCategoryDialogOpen(false);
+      setCreateCategoryForForm(false);
+      setNotice(`Category "${created.name}" created.`);
+    } catch (createError) {
+      setCategoryError(requestMessage(createError));
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const openCategoryDialog = (forProductForm = false) => {
+    setCategoryName("");
+    setCategoryError(null);
+    setCreateCategoryForForm(forProductForm);
+    setCategoryDialogOpen(true);
   };
 
   const openEdit = (product: AdminMenuProduct) => {
@@ -279,13 +338,81 @@ export default function MenuManagement() {
           <h1 className="mt-1 text-3xl font-bold text-[#354632]">Menu Management</h1>
           <p className="mt-2 text-sm text-gray-600">Update products and availability shown to customers.</p>
         </div>
-        <button type="button" onClick={openCreate} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#354632] px-5 font-semibold text-white hover:bg-[#263524]">
-          <Plus size={18} /> Add New Item
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => openCategoryDialog()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#354632] bg-white px-4 font-semibold text-[#354632] hover:bg-[#f3f5ef]">
+            <Plus size={18} /> Add Category
+          </button>
+          <button type="button" onClick={openCreate} disabled={categories.length === 0} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#354632] px-5 font-semibold text-white hover:bg-[#263524] disabled:cursor-not-allowed disabled:opacity-50">
+            <Plus size={18} /> Add New Item
+          </button>
+        </div>
       </header>
 
       {notice && <p role="status" className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">{notice}</p>}
       {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
+
+      {categoryDialogOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-5"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !categorySaving) {
+              setCategoryDialogOpen(false);
+            }
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-category-title"
+            onSubmit={(event) => void handleCreateCategory(event)}
+            className="w-full max-w-md space-y-4 rounded-t-2xl bg-white p-5 sm:rounded-2xl sm:p-6"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="create-category-title" className="text-xl font-bold text-[#354632]">
+                  Add Category
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  New categories can be assigned to menu items.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={categorySaving}
+                onClick={() => setCategoryDialogOpen(false)}
+                className="min-h-10 rounded-lg px-3 text-sm font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+              >
+                Close
+              </button>
+            </div>
+            <label className="block space-y-1 text-sm font-medium text-gray-700">
+              Category name *
+              <input
+                autoFocus
+                required
+                maxLength={80}
+                value={categoryName}
+                onChange={(event) => setCategoryName(event.target.value)}
+                className="min-h-11 w-full rounded-lg border border-gray-300 px-3"
+              />
+            </label>
+            {categoryError && (
+              <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+                {categoryError}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={categorySaving}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#354632] px-4 font-semibold text-white hover:bg-[#263524] disabled:opacity-50"
+            >
+              {categorySaving && <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />}
+              {categorySaving ? "Creating category..." : "Create Category"}
+            </button>
+          </form>
+        </div>
+      )}
 
       <div className="grid gap-3 rounded-2xl border border-[#e7e4d8] bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
         <label className="relative sm:col-span-2 lg:col-span-1">
@@ -297,7 +424,7 @@ export default function MenuManagement() {
           <span className="shrink-0">Category</span>
           <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} className="min-h-11 min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-2">
             <option value="ALL">All categories</option>
-            {categories.map((category) => <option key={category}>{category}</option>)}
+            {categoryNames.map((category) => <option key={category}>{category}</option>)}
           </select>
         </label>
         <label className="flex items-center gap-2 text-sm text-gray-700">
@@ -402,12 +529,16 @@ export default function MenuManagement() {
               <label className="space-y-1 text-sm font-medium text-gray-700 sm:col-span-2">Product name *
                 <input required maxLength={120} value={form.name} onChange={(event) => updateForm("name", event.target.value)} className="min-h-11 w-full rounded-lg border border-gray-300 px-3" />
               </label>
-              <label className="space-y-1 text-sm font-medium text-gray-700">Category *
-                <select required value={form.category} onChange={(event) => updateForm("category", event.target.value)} className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3">
+              <div className="space-y-1 text-sm font-medium text-gray-700">
+                <label htmlFor="product-category">Category *</label>
+                <div className="flex items-center gap-2">
+                <select id="product-category" required value={form.category} onChange={(event) => updateForm("category", event.target.value)} className="min-h-11 min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3">
                   <option value="" disabled>Select a category</option>
-                  {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+                  {categoryNames.map((category) => <option key={category} value={category}>{category}</option>)}
                 </select>
-              </label>
+                <button type="button" onClick={() => openCategoryDialog(true)} className="min-h-11 shrink-0 rounded-lg border border-[#354632] px-3 text-xs font-semibold text-[#354632] hover:bg-[#f3f5ef]">+ New Category</button>
+                </div>
+              </div>
               <label className="space-y-1 text-sm font-medium text-gray-700">Availability
                 <select value={form.availabilityStatus} onChange={(event) => updateForm("availabilityStatus", event.target.value as Status)} className="min-h-11 w-full rounded-lg border border-gray-300 bg-white px-3">
                   {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}

@@ -574,7 +574,7 @@ const productIdSchema = z.string().min(1).max(120).regex(/^[A-Za-z0-9_&-]+$/);
 
 async function getAdminMenuProduct(productId: string) {
   const result = await db.query(
-    `SELECT p.id, p.name, p.description, p.category, p.image_url,
+    `SELECT p.id, p.name, p.description, c.name AS category, p.image_url,
             p.availability_status, p.featured, p.archived_at,
             COALESCE(
               json_agg(json_build_object('size', v.size, 'price', v.price)
@@ -583,9 +583,10 @@ async function getAdminMenuProduct(productId: string) {
               '[]'::json
             ) AS variants
      FROM products p
+     JOIN categories c ON c.id = p.category_id
      LEFT JOIN product_variants v ON v.product_id = p.id
      WHERE p.id = $1
-     GROUP BY p.id`,
+     GROUP BY p.id, c.name`,
     [productId],
   );
   const row = result.rows[0];
@@ -617,11 +618,55 @@ function menuProductResponse(row: Record<string, unknown>) {
   };
 }
 
+router.get("/categories", async (_req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT id, name
+       FROM categories
+       ORDER BY lower(name), name`,
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Admin category listing failed", {
+      code: (error as { code?: string }).code,
+    });
+    res.status(500).json({ message: "Unable to load categories." });
+  }
+});
+
+router.post("/categories", async (req, res) => {
+  const parsed = z.object({
+    name: z.string().trim().min(1).max(80),
+  }).strict().safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Enter a category name up to 80 characters." });
+    return;
+  }
+
+  try {
+    const result = await db.query(
+      `INSERT INTO categories (name)
+       VALUES ($1)
+       RETURNING id, name`,
+      [parsed.data.name],
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === "23505") {
+      res.status(409).json({ message: "A category with this name already exists." });
+      return;
+    }
+    console.error("Admin category creation failed", { code });
+    res.status(500).json({ message: "Unable to create the category." });
+  }
+});
+
 router.get("/menu", async (req, res) => {
   const includeArchived = req.query.includeArchived === "true";
   try {
     const result = await db.query(
-      `SELECT p.id, p.name, p.description, p.category, p.image_url,
+      `SELECT p.id, p.name, p.description, c.name AS category, p.image_url,
               p.availability_status, p.featured, p.archived_at,
               COALESCE(
                 json_agg(json_build_object('size', v.size, 'price', v.price)
@@ -630,9 +675,10 @@ router.get("/menu", async (req, res) => {
                 '[]'::json
               ) AS variants
        FROM products p
+       JOIN categories c ON c.id = p.category_id
        LEFT JOIN product_variants v ON v.product_id = p.id
        WHERE $1::boolean OR p.archived_at IS NULL
-       GROUP BY p.id
+       GROUP BY p.id, c.name
        ORDER BY p.archived_at NULLS FIRST, p.category, p.name`,
       [includeArchived],
     );
@@ -658,15 +704,31 @@ router.post("/menu", async (req, res) => {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    const categoryResult = await client.query(
+      `SELECT id, name FROM categories
+       WHERE lower(btrim(name)) = lower($1)
+       FOR KEY SHARE`,
+      [product.category],
+    );
+    const category = categoryResult.rows[0] as
+      | { id: string; name: string }
+      | undefined;
+    if (!category) {
+      await client.query("ROLLBACK");
+      res.status(400).json({ message: "Select an existing category." });
+      return;
+    }
     await client.query(
       `INSERT INTO products
-         (id, name, description, category, image_url, available, availability_status, featured)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+         (id, name, description, category, category_id, image_url,
+          available, availability_status, featured)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         productId,
         product.name,
         product.description || null,
-        product.category,
+        category.name,
+        category.id,
         product.image,
         product.availabilityStatus === "AVAILABLE",
         product.availabilityStatus,
@@ -708,6 +770,20 @@ router.patch("/menu/:productId", async (req, res) => {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
+    const categoryResult = await client.query(
+      `SELECT id, name FROM categories
+       WHERE lower(btrim(name)) = lower($1)
+       FOR KEY SHARE`,
+      [product.category],
+    );
+    const category = categoryResult.rows[0] as
+      | { id: string; name: string }
+      | undefined;
+    if (!category) {
+      await client.query("ROLLBACK");
+      res.status(400).json({ message: "Select an existing category." });
+      return;
+    }
     const existing = await client.query(
       "SELECT id FROM products WHERE id = $1 FOR UPDATE",
       [productId.data],
@@ -719,14 +795,16 @@ router.patch("/menu/:productId", async (req, res) => {
     }
     await client.query(
       `UPDATE products
-       SET name = $2, description = $3, category = $4, image_url = $5,
-           availability_status = $6, available = $7, featured = $8
+       SET name = $2, description = $3, category = $4, category_id = $5,
+           image_url = $6, availability_status = $7, available = $8,
+           featured = $9
        WHERE id = $1`,
       [
         productId.data,
         product.name,
         product.description || null,
-        product.category,
+        category.name,
+        category.id,
         product.image,
         product.availabilityStatus,
         product.availabilityStatus === "AVAILABLE",

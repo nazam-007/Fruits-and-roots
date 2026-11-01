@@ -76,6 +76,11 @@ export type AdminMenuProduct = {
   variants: Array<{ size: "Regular" | "Large"; price: number }>;
 };
 
+export type AdminCategory = {
+  id: string;
+  name: string;
+};
+
 export type AdminMenuProductInput = {
   name: string;
   description: string;
@@ -235,6 +240,17 @@ export function fetchAdminMenu(includeArchived = true) {
   return request<AdminMenuProduct[]>(
     `/menu${includeArchived ? "?includeArchived=true" : ""}`,
   );
+}
+
+export function fetchAdminCategories() {
+  return request<AdminCategory[]>("/categories");
+}
+
+export function createAdminCategory(name: string) {
+  return request<AdminCategory>("/categories", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
 }
 
 export function createAdminMenuProduct(input: AdminMenuProductInput) {

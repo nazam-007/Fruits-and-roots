@@ -3,7 +3,6 @@ import { useMemo, useState } from "react";
 import { Search, RefreshCw, UtensilsCrossed } from "lucide-react";
 
 import ProductCard from "../../components/customer/ProductCard";
-import { categories } from "../../data/menu";
 import { useMenu } from "../../context/MenuContext";
 
 export default function Menu() {
@@ -26,7 +25,10 @@ export default function Menu() {
     });
   }, [menuItems, searchQuery, activeCategory]);
   const menuCategories = useMemo(
-    () => [...new Set(menuItems.map((item) => item.category))].sort(),
+    () =>
+      [...new Set(menuItems.map((item) => item.category).filter(Boolean))].sort(
+        (left, right) => left.localeCompare(right),
+      ),
     [menuItems],
   );
 
@@ -70,7 +72,7 @@ export default function Menu() {
       {/* Category filters */}
       <div className="sticky top-16 z-30 -mx-4 border-b border-gray-100 bg-[#FAF8F2]/95 px-4 py-3 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl gap-3 overflow-x-auto pb-1">
-          {["All", ...new Set([...categories, ...menuCategories])].map((category) => (
+          {["All", ...menuCategories].map((category) => (
             <button
               key={category}
               type="button"
