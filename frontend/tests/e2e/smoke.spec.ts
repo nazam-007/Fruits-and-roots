@@ -37,6 +37,16 @@ async function seedCart(page: Page, product: MenuProduct) {
   );
 }
 
+async function expectNoHorizontalOverflow(page: Page) {
+  for (const width of [320, 360, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(
+      () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      { message: `page should not overflow horizontally at ${width}px` },
+    ).toBe(true);
+  }
+}
+
 test("customer menu loads backend products and supports search and category filters", async ({
   page,
   request,
@@ -78,6 +88,7 @@ test("customer menu product imagery loads successfully", async ({ page }) => {
 test("customer category filters use visible database menu products", async ({ page }) => {
   const drink: MenuProduct = {
     id: "drink-item",
+    categoryId: "00000000-0000-4000-8000-000000000001",
     name: "Fresh Juice",
     category: "Drinks",
     available: true,
@@ -86,6 +97,7 @@ test("customer category filters use visible database menu products", async ({ pa
   };
   const food: MenuProduct = {
     id: "food-item",
+    categoryId: "00000000-0000-4000-8000-000000000002",
     name: "Seasonal Bowl",
     category: "Food",
     available: true,
@@ -113,12 +125,22 @@ test("customer category filters use visible database menu products", async ({ pa
   await page.getByRole("button", { name: "Food", exact: true }).click();
   await expect(page.getByRole("link", { name: "View Seasonal Bowl" })).toBeVisible();
   await expect(page.getByRole("link", { name: "View Fresh Juice" })).toHaveCount(0);
+
+  foodAdded = false;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(page.getByRole("button", { name: "All Items" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expectNoHorizontalOverflow(page);
 });
 
 test("admin category creation is database-backed and assignable to a product", async ({
   page,
 }) => {
-  const categories = [{ id: "category-drinks", name: "Drinks" }];
+  const categories = [
+    { id: "00000000-0000-4000-8000-000000000001", name: "Drinks", sortOrder: 0 },
+  ];
   const products: Array<Record<string, unknown>> = [];
   await page.route(menuEndpoint, async (route) => {
     await route.fulfill({ json: [] });
@@ -131,7 +153,9 @@ test("admin category creation is database-backed and assignable to a product", a
       return;
     }
     if (url.pathname === "/api/admin/categories" && request.method() === "GET") {
-      await route.fulfill({ json: categories });
+      await route.fulfill({
+        json: [...categories].sort((left, right) => left.sortOrder - right.sortOrder),
+      });
       return;
     }
     if (url.pathname === "/api/admin/menu" && request.method() === "GET") {
@@ -147,15 +171,77 @@ test("admin category creation is database-backed and assignable to a product", a
         });
         return;
       }
-      const category = { id: `category-${name.toLowerCase()}`, name };
+      const category = {
+        id: "00000000-0000-4000-8000-000000000002",
+        name,
+        sortOrder: categories.length,
+      };
       categories.push(category);
       await route.fulfill({ status: 201, json: category });
       return;
     }
+    if (/^\/api\/admin\/categories\/[0-9a-f-]+$/i.test(url.pathname) && request.method() === "PATCH") {
+      const categoryId = url.pathname.split("/").at(-1);
+      const { name } = request.postDataJSON() as { name: string };
+      if (categories.some((category) => category.id !== categoryId && category.name.toLowerCase() === name.toLowerCase())) {
+        await route.fulfill({
+          status: 409,
+          json: { message: "A category with this name already exists." },
+        });
+        return;
+      }
+      const category = categories.find((item) => item.id === categoryId);
+      if (!category) {
+        await route.fulfill({ status: 404, json: { message: "Category not found." } });
+        return;
+      }
+      category.name = name;
+      for (const product of products) {
+        if (product.categoryId === category.id) product.category = name;
+      }
+      await route.fulfill({ json: category });
+      return;
+    }
+    if (url.pathname === "/api/admin/categories/order" && request.method() === "PUT") {
+      const { categoryIds } = request.postDataJSON() as { categoryIds: string[] };
+      if (
+        categoryIds.length !== categories.length ||
+        new Set(categoryIds).size !== categories.length ||
+        categories.some((category) => !categoryIds.includes(category.id))
+      ) {
+        await route.fulfill({ status: 409, json: { message: "Category list changed." } });
+        return;
+      }
+      categoryIds.forEach((id, sortOrder) => {
+        const category = categories.find((item) => item.id === id);
+        if (category) category.sortOrder = sortOrder;
+      });
+      await route.fulfill({
+        json: [...categories].sort((left, right) => left.sortOrder - right.sortOrder),
+      });
+      return;
+    }
+    if (/^\/api\/admin\/categories\/[0-9a-f-]+$/i.test(url.pathname) && request.method() === "DELETE") {
+      const categoryId = url.pathname.split("/").at(-1);
+      const productCount = products.filter((product) => product.categoryId === categoryId).length;
+      if (productCount > 0) {
+        await route.fulfill({
+          status: 409,
+          json: { message: `Cannot delete Healthy Food because ${productCount} product is assigned to it.` },
+        });
+        return;
+      }
+      const index = categories.findIndex((category) => category.id === categoryId);
+      if (index >= 0) categories.splice(index, 1);
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
     if (url.pathname === "/api/admin/menu" && request.method() === "POST") {
       const input = request.postDataJSON() as Record<string, unknown>;
+      const category = categories.find((item) => item.name === input.category);
       const product = {
         id: "food-test-product",
+        categoryId: category?.id,
         ...input,
         archived: false,
         variants: [
@@ -183,6 +269,12 @@ test("admin category creation is database-backed and assignable to a product", a
   await expect(page.getByRole("status")).toContainText('Category "Food" created.');
   await expect(page.locator("select").first()).toHaveValue("Food");
 
+  const categoryList = page.getByRole("region", { name: "Categories" }).locator("li");
+  await page.getByRole("button", { name: "Move Food up" }).click();
+  await expect(categoryList.first()).toContainText("Food");
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Move Food up" })).toBeDisabled();
+
   await page.getByRole("button", { name: "Add Category" }).click();
   await page.getByLabel("Category name *").fill("fOoD");
   await page.getByRole("button", { name: "Create Category" }).click();
@@ -202,6 +294,31 @@ test("admin category creation is database-backed and assignable to a product", a
   await expect(
     page.locator("article").filter({ hasText: "Seasonal Bowl" }).getByText("Food", { exact: true }),
   ).toBeVisible();
+
+  const foodCategoryRow = page.getByRole("region", { name: "Categories" }).getByRole("listitem").filter({ hasText: "Food" });
+  await foodCategoryRow.getByRole("button", { name: "Rename" }).click();
+  await page.getByLabel("Category name *").fill("   ");
+  await page.getByRole("button", { name: "Save Name" }).click();
+  await expect(page.getByRole("alert")).toContainText("Enter a category name");
+  await page.getByLabel("Category name *").fill("Drinks");
+  await page.getByRole("button", { name: "Save Name" }).click();
+  await expect(page.getByRole("alert")).toContainText("already exists");
+  await page.getByLabel("Category name *").fill("Healthy Food");
+  await page.getByRole("button", { name: "Save Name" }).click();
+  await expect(page.getByRole("status")).toContainText('Category renamed to "Healthy Food".');
+  await expect(
+    page.locator("article").filter({ hasText: "Seasonal Bowl" }).getByText("Healthy Food", { exact: true }),
+  ).toBeVisible();
+  await page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("region", { name: "Categories" }).getByRole("listitem")
+    .filter({ hasText: "Healthy Food" }).getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByRole("alert")).toContainText("1 product is assigned to it");
+
+  await page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("region", { name: "Categories" }).getByRole("listitem")
+    .filter({ hasText: "Drinks" }).getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByRole("region", { name: "Categories" }).getByText("Drinks")).toHaveCount(0);
+  await expectNoHorizontalOverflow(page);
 });
 
 test("menu product prices match the public API and unavailable items cannot be added", async ({

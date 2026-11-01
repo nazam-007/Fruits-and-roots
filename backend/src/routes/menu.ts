@@ -10,6 +10,7 @@ router.get("/", async (_req, res) => {
       SELECT
         p.id,
         p.name,
+        p.category_id AS category_id,
         c.name AS category,
         p.image_url,
         p.availability_status,
@@ -43,12 +44,13 @@ router.get("/", async (_req, res) => {
       LEFT JOIN product_variants v
         ON p.id = v.product_id
       WHERE p.archived_at IS NULL
-      GROUP BY p.id, c.name
-      ORDER BY c.name, p.name
+      GROUP BY p.id, c.name, c.sort_order
+      ORDER BY c.sort_order, c.name, p.name
     `);
 
     const menu = result.rows.map((item) => ({
       id: item.id,
+      categoryId: item.category_id,
       name: item.name,
       category: item.category,
       image: item.image_url,
