@@ -174,6 +174,7 @@ export function fetchAdminOrders(
   offset: number,
   signal?: AbortSignal,
   page?: number,
+  date?: string,
 ) {
   const query = new URLSearchParams({
     status,
@@ -184,6 +185,7 @@ export function fetchAdminOrders(
   } else {
     query.set("page", String(page));
   }
+  if (date !== undefined) query.set("date", date);
   return request<{
     items: AdminOrderRow[];
     orders: AdminOrderRow[];

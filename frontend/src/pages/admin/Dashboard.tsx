@@ -23,6 +23,18 @@ const cards = [
   { key: "cancelled_orders", label: "Cancelled", icon: XCircle },
 ] as const;
 
+function getIndiaDate() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((value) => value.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
 export default function Dashboard() {
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
@@ -100,19 +112,48 @@ export default function Dashboard() {
         aria-label="Order statistics"
         className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
       >
-        {cards.map(({ key, label, icon: Icon }) => (
-          <article key={key} className="rounded-2xl border border-[#e7e4d8] bg-white p-4 shadow-sm">
-            <div className="flex items-center justify-between text-sm text-[#73796d]">
-              {label}
-              <Icon size={18} className="text-[#658160]" aria-hidden="true" />
-            </div>
-            <p className="mt-3 text-3xl font-bold tabular-nums text-[#253b2a]">
-              {loading && !data
-                ? "—"
-                : data?.summary[key] ?? (error ? "—" : 0)}
-            </p>
-          </article>
-        ))}
+        {cards.map(({ key, label, icon: Icon }) => {
+          const status =
+            key === "total_orders" || key === "total_orders_today"
+              ? "ALL"
+              : key === "new_orders"
+                ? "PLACED"
+                : key === "preparing_orders"
+                  ? "PREPARING"
+                  : key === "ready_orders"
+                    ? "READY"
+                    : key === "completed_orders"
+                      ? "COMPLETED"
+                      : "CANCELLED";
+          const searchParams = new URLSearchParams({
+            status,
+            page: "1",
+          });
+          if (key === "total_orders_today") {
+            searchParams.set("date", getIndiaDate());
+          }
+
+          return (
+            <Link
+              key={key}
+              to={`/admin/orders?${searchParams}`}
+              aria-label={`${label}: ${data?.summary[key] ?? "orders"}`}
+              className="group block h-full rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2"
+            >
+              <article className="h-full rounded-2xl border border-[#e7e4d8] bg-white p-4 shadow-sm transition group-hover:-translate-y-0.5 group-hover:shadow-md">
+                <div className="flex items-center justify-between text-sm text-[#73796d]">
+                  {label}
+                  <Icon size={18} className="text-[#658160]" aria-hidden="true" />
+                </div>
+                <p className="mt-3 text-3xl font-bold tabular-nums text-[#253b2a]">
+                  {loading && !data
+                    ? "—"
+                    : data?.summary[key] ?? (error ? "—" : 0)}
+                </p>
+              </article>
+            </Link>
+          );
+        })}
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2">

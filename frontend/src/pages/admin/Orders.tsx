@@ -26,6 +26,12 @@ function isOrderStatus(value: string | null): value is (typeof orderStatuses)[nu
 const formatPrice = (amount: number) =>
   `₹${Number(amount).toLocaleString("en-IN")}`;
 
+function isValidDateFilter(value: string | null): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 export default function Orders() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlStatus = searchParams.get("status");
@@ -33,6 +39,8 @@ export default function Orders() {
     ? urlStatus
     : "PLACED";
   const pageParam = searchParams.get("page");
+  const dateParam = searchParams.get("date");
+  const dateFilter = isValidDateFilter(dateParam) ? dateParam : undefined;
   const parsedPage = pageParam === null ? 1 : Number(pageParam);
   const pageNumber =
     Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
@@ -58,6 +66,7 @@ export default function Orders() {
         offset,
         signal,
         pageNumber,
+        dateFilter,
       );
       if (signal.aborted) return;
       setItems(result.items);
@@ -79,9 +88,13 @@ export default function Orders() {
     } finally {
       if (!signal.aborted) setLoading(false);
     }
-  }, [pageNumber, searchParams, setSearchParams, status]);
+  }, [dateFilter, pageNumber, searchParams, setSearchParams, status]);
 
-  const refreshNow = useVisiblePolling(refresh, 2000, `${status}:${pageNumber}`);
+  const refreshNow = useVisiblePolling(
+    refresh,
+    2000,
+    `${status}:${pageNumber}:${dateFilter ?? ""}`,
+  );
 
   const setFilter = (nextStatus: "ALL" | AdminOrderStatus) => {
     const nextParams = new URLSearchParams(searchParams);
@@ -106,9 +119,12 @@ export default function Orders() {
       const nextParams = new URLSearchParams(searchParams);
       if (!isOrderStatus(urlStatus)) nextParams.set("status", "PLACED");
       if (!validPageParam) nextParams.set("page", "1");
+      if (dateParam !== null && !isValidDateFilter(dateParam)) {
+        nextParams.delete("date");
+      }
       setSearchParams(nextParams, { replace: true });
     }
-  }, [pageParam, searchParams, setSearchParams, urlStatus]);
+  }, [dateParam, pageParam, searchParams, setSearchParams, urlStatus]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const start = total === 0 ? 0 : (pageNumber - 1) * PAGE_SIZE + 1;

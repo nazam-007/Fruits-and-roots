@@ -270,6 +270,7 @@ router.get("/orders", async (req, res) => {
     limit: z.coerce.number().int().min(1).max(100).optional(),
     page: z.coerce.number().int().min(1).optional(),
     offset: z.coerce.number().int().min(0).optional(),
+    date: z.string().date().optional(),
   }).safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid order filter or page." });
@@ -292,9 +293,15 @@ router.get("/orders", async (req, res) => {
          FROM orders o
          LEFT JOIN payments p ON p.order_id = o.id
          WHERE ($1 = 'ALL' OR o.order_status = $1)
+           AND (
+             $4::date IS NULL OR (
+               o.created_at >= ($4::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+               AND o.created_at < (($4::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata')
+             )
+           )
          ORDER BY o.created_at DESC NULLS LAST, o.id DESC
          LIMIT $2 OFFSET $3`,
-        [parsed.data.status, limit, offset],
+        [parsed.data.status, limit, offset, parsed.data.date ?? null],
       ),
       db.query(
         `SELECT
@@ -304,7 +311,14 @@ router.get("/orders", async (req, res) => {
            COUNT(*) FILTER (WHERE order_status = 'READY')::int AS ready,
            COUNT(*) FILTER (WHERE order_status = 'COMPLETED')::int AS completed,
            COUNT(*) FILTER (WHERE order_status = 'CANCELLED')::int AS cancelled
-         FROM orders`,
+         FROM orders
+         WHERE (
+           $1::date IS NULL OR (
+             created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+             AND created_at < (($1::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata')
+           )
+         )`,
+        [parsed.data.date ?? null],
       ),
     ]);
     const counts = {
