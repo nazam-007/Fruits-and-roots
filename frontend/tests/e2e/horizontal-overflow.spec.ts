@@ -105,7 +105,7 @@ async function mockAdminReadApis(context: BrowserContext) {
     } else if (path.endsWith("/dashboard")) {
       body = {
         summary: {
-          all_orders: 1,
+          total_orders: 1,
           total_orders_today: 1,
           new_orders: 0,
           preparing_orders: 1,

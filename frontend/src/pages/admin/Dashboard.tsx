@@ -107,7 +107,9 @@ export default function Dashboard() {
               <Icon size={18} className="text-[#658160]" aria-hidden="true" />
             </div>
             <p className="mt-3 text-3xl font-bold tabular-nums text-[#253b2a]">
-              {loading && !data ? "—" : (data?.summary[key] ?? 0)}
+              {loading && !data
+                ? "—"
+                : data?.summary[key] ?? (error ? "—" : 0)}
             </p>
           </article>
         ))}

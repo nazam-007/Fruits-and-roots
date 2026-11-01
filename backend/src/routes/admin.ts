@@ -231,7 +231,7 @@ router.get("/dashboard", async (_req, res) => {
                  AT TIME ZONE 'Asia/Kolkata') AS start_at
        )
        SELECT
-         (SELECT COUNT(*)::int FROM orders) AS all_orders,
+         (SELECT COUNT(*)::int FROM orders) AS total_orders,
          COUNT(*) FILTER (WHERE o.created_at >= local_day.start_at)::int AS total_orders_today,
          COUNT(*) FILTER (WHERE o.order_status = 'PLACED' AND o.created_at >= local_day.start_at)::int AS new_orders,
          COUNT(*) FILTER (WHERE o.order_status = 'PREPARING' AND o.created_at >= local_day.start_at)::int AS preparing_orders,

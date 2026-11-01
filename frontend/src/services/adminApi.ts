@@ -154,7 +154,18 @@ export function logoutAdmin() {
 }
 
 export function fetchDashboard(signal?: AbortSignal) {
-  return request<AdminDashboardData>("/dashboard", { signal });
+  return request<AdminDashboardData>("/dashboard", { signal }).then((data) => {
+    if (
+      !data ||
+      !data.summary ||
+      !Number.isSafeInteger(data.summary.total_orders) ||
+      data.summary.total_orders < 0
+    ) {
+      throw new Error("Dashboard response is missing the all-time order count.");
+    }
+
+    return data;
+  });
 }
 
 export function fetchAdminOrders(
