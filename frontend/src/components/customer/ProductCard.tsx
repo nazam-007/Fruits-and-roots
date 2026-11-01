@@ -19,7 +19,12 @@ export default function ProductCard({ item }: Props) {
         ? "Coming Soon"
         : "Price Not Set";
   return (
-    <article className="group h-full overflow-hidden rounded-2xl border border-[#e7e4d8] bg-white shadow-[0_8px_26px_-20px_rgba(30,51,35,0.55)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_18px_38px_-20px_rgba(30,51,35,0.35)] sm:rounded-3xl">
+    <Link
+      to={`/product/${encodeURIComponent(item.id)}`}
+      aria-label={`View ${item.name}`}
+      className="group block h-full rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2 sm:rounded-3xl"
+    >
+      <article className="h-full overflow-hidden rounded-2xl border border-[#e7e4d8] bg-white shadow-[0_8px_26px_-20px_rgba(30,51,35,0.55)] transition duration-300 group-hover:-translate-y-1 group-hover:shadow-[0_18px_38px_-20px_rgba(30,51,35,0.35)] sm:rounded-3xl">
       <div className="relative aspect-[4/3] overflow-hidden bg-[#e9eddf]">
         <MenuItemImage
           item={item}
@@ -65,14 +70,14 @@ export default function ProductCard({ item }: Props) {
           )}
         </div>
 
-        <Link
-          to={`/product/${item.id}`}
-          aria-label={`View ${item.name}`}
-          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#edf1e6] text-[#31573a] transition-colors hover:bg-[#31573a] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2"
+        <span
+          aria-hidden="true"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#edf1e6] text-[#31573a] transition-colors group-hover:bg-[#31573a] group-hover:text-white"
         >
           <ArrowRight size={18} aria-hidden="true" />
-        </Link>
+        </span>
       </div>
-    </article>
+      </article>
+    </Link>
   );
 }
