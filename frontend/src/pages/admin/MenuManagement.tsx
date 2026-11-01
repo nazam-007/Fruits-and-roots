@@ -577,7 +577,7 @@ export default function MenuManagement() {
 
       {categoryDialogMode && (
         <div
-          className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-5"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 sm:p-5"
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget && !categorySaving) {
@@ -603,7 +603,7 @@ export default function MenuManagement() {
                 void handleCreateCategory(event);
               }
             }}
-            className="w-full max-w-md space-y-4 rounded-t-2xl bg-white p-5 sm:rounded-2xl sm:p-6"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-5 overflow-y-auto rounded-2xl border border-[#e7e4d8] bg-white p-5 shadow-2xl sm:p-6"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -623,20 +623,21 @@ export default function MenuManagement() {
                   setCategoryDialogMode(null);
                   setEditingCategory(null);
                 }}
-                className="min-h-10 rounded-lg px-3 text-sm font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+                className="min-h-10 shrink-0 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50"
               >
                 Close
               </button>
             </div>
-            <label className="block space-y-1 text-sm font-medium text-gray-700">
+            <label className="block text-sm font-semibold text-gray-700">
               Category name *
               <input
+                id="category-name"
                 autoFocus
                 required
                 maxLength={80}
                 value={categoryName}
                 onChange={(event) => setCategoryName(event.target.value)}
-                className="min-h-11 w-full rounded-lg border border-gray-300 px-3"
+                className="mt-2 block min-h-12 w-full rounded-xl border border-gray-300 bg-white px-3 text-base font-normal text-[#253b2a] shadow-sm outline-none transition placeholder:text-gray-400 focus:border-[#354632] focus:ring-4 focus:ring-[#edf1e6] focus-visible:outline-none"
               />
             </label>
             {categoryError && (
@@ -647,7 +648,7 @@ export default function MenuManagement() {
             <button
               type="submit"
               disabled={categorySaving}
-              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#354632] px-4 font-semibold text-white hover:bg-[#263524] disabled:opacity-50"
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#354632] px-4 font-semibold text-white shadow-sm transition hover:bg-[#263524] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#354632] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {categorySaving && <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />}
               {categorySaving
