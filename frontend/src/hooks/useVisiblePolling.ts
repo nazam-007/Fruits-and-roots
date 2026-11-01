@@ -8,6 +8,7 @@ export function useVisiblePolling(
   refreshKey?: string | number,
 ) {
   const callbackRef = useRef(callback);
+  const runRef = useRef<() => void>(() => {});
   const activeRef = useRef(false);
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
@@ -36,14 +37,14 @@ export function useVisiblePolling(
         await callbackRef.current(controller.signal);
       } finally {
         inFlightRef.current = false;
-        controllerRef.current = null;
+        if (controllerRef.current === controller) controllerRef.current = null;
         if (pendingRef.current && activeRef.current && !document.hidden) {
           pendingRef.current = false;
-          void run();
+          void runRef.current();
         }
       }
     };
-    runRef.current = run;
+    runRef.current = () => void run();
 
     const stopInterval = () => {
       if (intervalId !== undefined) {
@@ -51,14 +52,12 @@ export function useVisiblePolling(
         intervalId = undefined;
       }
     };
-
     const startInterval = () => {
       stopInterval();
       if (document.hidden) return;
       void run();
       intervalId = window.setInterval(() => void run(), intervalMs);
     };
-
     const handleVisibilityChange = () => {
       if (document.hidden) {
         stopInterval();

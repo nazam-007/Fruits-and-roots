@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, Check, Clock3, RefreshCw, ShieldCheck } from "lucide-react";
 import {
+  cancelOrder,
   fetchOrder,
+  OrderApiError,
   type OrderDetails,
   type OrderStatus,
   type PaymentStatus,
 } from "../../services/ordersApi";
+import { useOrderStatusUpdates } from "../../hooks/useOrderStatusUpdates";
 
 const orderStatusLabels: Record<OrderStatus, string> = {
   PLACED: "Order Placed",
@@ -40,105 +43,147 @@ export default function OrderTracking() {
   const [order, setOrder] = useState<OrderDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [canceling, setCanceling] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const cancelRequestRef = useRef(false);
   const requestInFlightRef = useRef(false);
+  const pendingRefreshRef = useRef(false);
   const requestIdRef = useRef(0);
-  const controllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(false);
+  const refreshStatusRef = useRef<() => Promise<void>>(async () => {});
 
-  const refreshStatus = useCallback(async (showLoading = false) => {
-    if (!orderId) {
-      setError("Order not found.");
-      setLoading(false);
-      return;
-    }
-
-    let token: string | null;
+  const getTrackingToken = useCallback(() => {
+    if (!orderId) return null;
     try {
-      token = window.sessionStorage.getItem(
+      return window.sessionStorage.getItem(
         `fruits-roots-order-token:${orderId}`,
       );
     } catch {
-      token = null;
-    }
-    if (!token) {
-      setError(
-        "This order's secure tracking access is not available in this browser tab.",
-      );
-      setLoading(false);
-      return;
-    }
-
-    if (
-      document.visibilityState === "hidden" ||
-      requestInFlightRef.current
-    ) {
-      return;
-    }
-
-    const requestId = ++requestIdRef.current;
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    requestInFlightRef.current = true;
-    if (showLoading) setLoading(true);
-
-    try {
-      const latestOrder = await fetchOrder(orderId, token, controller.signal);
-      if (requestId !== requestIdRef.current) return;
-      setOrder(latestOrder);
-      setError(null);
-    } catch (fetchError) {
-      if (controller.signal.aborted || requestId !== requestIdRef.current) {
-        return;
-      }
-      setError(
-        fetchError instanceof Error
-          ? fetchError.message
-          : "Unable to refresh order status.",
-      );
-    } finally {
-      if (requestId === requestIdRef.current) {
-        controllerRef.current = null;
-        requestInFlightRef.current = false;
-        setLoading(false);
-      }
+      return null;
     }
   }, [orderId]);
 
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => void refreshStatus(true), 0);
-    return () => {
-      window.clearTimeout(timeoutId);
-      requestIdRef.current += 1;
-      controllerRef.current?.abort();
-      controllerRef.current = null;
-      requestInFlightRef.current = false;
-    };
-  }, [refreshStatus]);
-
-  const currentOrderStatus = order?.orderStatus;
-  useEffect(() => {
-    if (
-      currentOrderStatus &&
-      terminalOrderStatuses.includes(currentOrderStatus)
-    ) {
+  const refreshStatus = useCallback(async (showInitialLoading = false) => {
+    if (!orderId) {
+      if (mountedRef.current) {
+        setError("Order not found.");
+        setLoading(false);
+      }
       return;
     }
 
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void refreshStatus();
+    const token = getTrackingToken();
+    if (!token) {
+      if (mountedRef.current) {
+        setError(
+          "This order's secure tracking access is not available in this browser tab.",
+        );
+        setLoading(false);
       }
-    }, 2000);
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void refreshStatus();
+      return;
+    }
+
+    if (requestInFlightRef.current) {
+      pendingRefreshRef.current = true;
+      return;
+    }
+
+    requestInFlightRef.current = true;
+    const requestId = ++requestIdRef.current;
+    if (showInitialLoading && mountedRef.current) setLoading(true);
+    try {
+      const latestOrder = await fetchOrder(orderId, token);
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        setOrder(latestOrder);
+        setError(null);
       }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    } catch (fetchError) {
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        setError(
+          fetchError instanceof Error
+            ? fetchError.message
+            : "Unable to refresh order status.",
+        );
+      }
+    } finally {
+      requestInFlightRef.current = false;
+      if (mountedRef.current && requestId === requestIdRef.current) {
+        setLoading(false);
+      }
+      if (pendingRefreshRef.current && mountedRef.current) {
+        pendingRefreshRef.current = false;
+        void refreshStatusRef.current();
+      }
+    }
+  }, [getTrackingToken, orderId]);
+
+  useEffect(() => {
+    refreshStatusRef.current = () => refreshStatus();
+  }, [refreshStatus]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const timeoutId = window.setTimeout(() => void refreshStatus(true), 0);
     return () => {
-      window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      mountedRef.current = false;
+      requestIdRef.current += 1;
+      window.clearTimeout(timeoutId);
     };
-  }, [currentOrderStatus, refreshStatus]);
+  }, [refreshStatus]);
+
+  const trackingToken = getTrackingToken();
+  useOrderStatusUpdates(
+    orderId,
+    trackingToken,
+    order?.orderStatus,
+    refreshStatus,
+  );
+
+  const cancelCustomerOrder = async () => {
+    if (!order || order.orderStatus !== "PLACED" || cancelRequestRef.current) {
+      return;
+    }
+    if (!window.confirm("Cancel this order? This action cannot be undone.")) {
+      return;
+    }
+
+    const token = getTrackingToken();
+    if (!token || !orderId) {
+      setError("Secure tracking access is unavailable. This order cannot be cancelled from this browser.");
+      return;
+    }
+
+    cancelRequestRef.current = true;
+    setCanceling(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await cancelOrder(orderId, token);
+      await refreshStatus();
+      setNotice(
+        result.refundReviewRequired
+          ? "Your order was cancelled. A verified UPI payment may need refund review; no refund was issued automatically."
+          : "Your order was cancelled successfully.",
+      );
+    } catch (cancelError) {
+      if (cancelError instanceof OrderApiError && cancelError.status === 409) {
+        await refreshStatus();
+        setNotice(
+          cancelError.message ||
+            "This order can no longer be cancelled. The latest status has been refreshed.",
+        );
+      } else {
+        setError(
+          cancelError instanceof Error
+            ? cancelError.message
+            : "Unable to cancel this order.",
+        );
+      }
+    } finally {
+      cancelRequestRef.current = false;
+      setCanceling(false);
+    }
+  };
 
   if (!order && loading) {
     return (
@@ -214,6 +259,14 @@ export default function OrderTracking() {
           className="mb-5 rounded-xl border border-[#edc8bd] bg-[#fff2ee] px-4 py-3 text-sm text-[#984734]"
         >
           {error} Your last successfully loaded order details remain visible.
+        </p>
+      )}
+      {notice && (
+        <p
+          role="status"
+          className="mb-5 break-words rounded-xl border border-[#c9ddc4] bg-[#f2f7ee] px-4 py-3 text-sm text-[#31573a]"
+        >
+          {notice}
         </p>
       )}
 
@@ -328,6 +381,21 @@ export default function OrderTracking() {
               <li className="font-semibold text-[#984734]">Order Cancelled</li>
             )}
           </ol>
+          {order.orderStatus === "PLACED" && (
+            <div className="mt-6 border-t border-[#eeece4] pt-5">
+              <button
+                type="button"
+                onClick={() => void cancelCustomerOrder()}
+                disabled={canceling || loading}
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-full border border-[#edc8bd] px-5 text-sm font-semibold text-[#984734] transition hover:bg-[#fff2ee] disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+              >
+                {canceling ? "Cancelling..." : "Cancel order"}
+              </button>
+              <p className="mt-2 text-xs leading-5 text-[#73796d]">
+                Cancellation is available only before preparation begins.
+              </p>
+            </div>
+          )}
         </section>
 
         <aside className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">

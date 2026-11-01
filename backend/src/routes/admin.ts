@@ -12,6 +12,7 @@ import {
   verifyAdminPassword,
 } from "../adminPassword";
 import { db } from "../db";
+import { publishOrderStatus } from "../orderStatusEvents";
 
 const router = Router();
 const SESSION_COOKIE = "fr_admin_session";
@@ -275,7 +276,7 @@ router.get("/orders", async (req, res) => {
   }
 
   try {
-    const [orders, counts] = await Promise.all([
+    const [orders, statusCount] = await Promise.all([
       db.query(
         `SELECT o.id, o.order_number, o.customer_name, o.customer_phone,
                 o.fulfillment_type, o.total_amount, o.payment_status,
@@ -297,29 +298,19 @@ router.get("/orders", async (req, res) => {
            COUNT(*) FILTER (WHERE order_status = 'CANCELLED')::int AS cancelled
          FROM orders`,
       ),
-      db.query(
-        `SELECT
-           COUNT(*)::int AS all_orders,
-           COUNT(*) FILTER (WHERE order_status = 'PLACED')::int AS placed_orders,
-           COUNT(*) FILTER (WHERE order_status = 'PREPARING')::int AS preparing_orders,
-           COUNT(*) FILTER (WHERE order_status = 'READY')::int AS ready_orders,
-           COUNT(*) FILTER (WHERE order_status = 'COMPLETED')::int AS completed_orders,
-           COUNT(*) FILTER (WHERE order_status = 'CANCELLED')::int AS cancelled_orders
-         FROM orders`,
-      ),
     ]);
-    const statusCounts = {
-      ALL: counts.rows[0].total,
-      PLACED: counts.rows[0].placed,
-      PREPARING: counts.rows[0].preparing,
-      READY: counts.rows[0].ready,
-      COMPLETED: counts.rows[0].completed,
-      CANCELLED: counts.rows[0].cancelled,
+    const counts = {
+      ALL: statusCount.rows[0].total,
+      PLACED: statusCount.rows[0].placed,
+      PREPARING: statusCount.rows[0].preparing,
+      READY: statusCount.rows[0].ready,
+      COMPLETED: statusCount.rows[0].completed,
+      CANCELLED: statusCount.rows[0].cancelled,
     };
     res.json({
       items: orders.rows,
-      total: statusCounts[parsed.data.status],
-      counts: statusCounts,
+      total: counts[parsed.data.status],
+      counts,
       limit: parsed.data.limit,
       offset: parsed.data.offset,
       statusCounts: {
@@ -438,6 +429,7 @@ router.patch("/orders/:orderId/status", async (req, res) => {
       [orderId.data, parsedBody.data.status],
     );
     await client.query("COMMIT");
+    publishOrderStatus(orderId.data, parsedBody.data.status);
     res.json({ orderId: orderId.data, orderStatus: parsedBody.data.status });
   } catch (error) {
     await client.query("ROLLBACK");

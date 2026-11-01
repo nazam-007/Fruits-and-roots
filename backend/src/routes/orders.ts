@@ -3,6 +3,10 @@ import { Router, type RequestHandler } from "express";
 import QRCode from "qrcode";
 import { z } from "zod";
 import { db } from "../db";
+import {
+  publishOrderStatus,
+  subscribeToOrderStatus,
+} from "../orderStatusEvents";
 
 const router = Router();
 
@@ -76,6 +80,7 @@ function rateLimit(maxRequests: number, windowMs: number): RequestHandler {
 const limitQuotes = rateLimit(30, 60_000);
 const limitOrders = rateLimit(5, 60_000);
 const limitTracking = rateLimit(60, 60_000);
+const limitOrderCancellation = rateLimit(10, 60_000);
 const limitDemoPayments = rateLimit(5, 60_000);
 
 function hasDuplicateItems(items: OrderRequest["items"] | z.infer<typeof quoteSchema>["items"]) {
@@ -848,6 +853,92 @@ router.post("/orders/:orderId/payment-claim", limitOrders, async (req, res) => {
   }
 });
 
+router.post(
+  "/orders/:orderId/cancel",
+  limitOrderCancellation,
+  async (req, res) => {
+    const orderId = z.string().uuid().safeParse(req.params.orderId);
+    const token = getBearerToken(req);
+    if (!orderId.success || !token) {
+      res.status(404).json({ message: "Order not found." });
+      return;
+    }
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      const cancellation = await client.query(
+        `UPDATE orders
+         SET order_status = 'CANCELLED'
+         WHERE id = $1
+           AND tracking_token_hash = $2
+           AND order_status = 'PLACED'
+         RETURNING id, order_status`,
+        [orderId.data, hash(token)],
+      );
+
+      if (cancellation.rowCount !== 1) {
+        const orderResult = await client.query(
+          `SELECT tracking_token_hash, order_status
+           FROM orders
+           WHERE id = $1`,
+          [orderId.data],
+        );
+        const order = orderResult.rows[0];
+        if (!order || !hashesMatch(order.tracking_token_hash, hash(token))) {
+          await client.query("ROLLBACK");
+          res.status(404).json({ message: "Order not found." });
+          return;
+        }
+
+        await client.query("ROLLBACK");
+        res.status(409).json({
+          message:
+            order.order_status === "PREPARING" || order.order_status === "READY"
+              ? "This order can no longer be cancelled because preparation has started."
+              : order.order_status === "COMPLETED"
+                ? "Completed orders cannot be cancelled."
+                : "This order has already been cancelled.",
+        });
+        return;
+      }
+
+      const paymentResult = await client.query(
+        `SELECT payment_status, payment_source, verified_at
+         FROM payments
+         WHERE order_id = $1
+         LIMIT 1`,
+        [orderId.data],
+      );
+      const payment = paymentResult.rows[0];
+      const refundReviewRequired =
+        payment?.payment_status === "PAID" &&
+        payment.payment_source === "MANUAL_UPI" &&
+        payment.verified_at !== null;
+
+      await client.query("COMMIT");
+      publishOrderStatus(orderId.data, "CANCELLED");
+      res.status(200).json({
+        orderId: orderId.data,
+        orderStatus: "CANCELLED",
+        refundReviewRequired,
+      });
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // The transaction may already have been rolled back by PostgreSQL.
+      }
+      console.error("Customer order cancellation failed", {
+        code: (error as { code?: string }).code,
+      });
+      res.status(500).json({ message: "Unable to cancel this order." });
+    } finally {
+      client.release();
+    }
+  },
+);
+
 router.get("/orders/:orderId", limitTracking, async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   const orderIdResult = z.string().uuid().safeParse(req.params.orderId);
@@ -888,5 +979,97 @@ router.get("/orders/:orderId", limitTracking, async (req, res) => {
     res.status(500).json({ message: "Unable to load order status." });
   }
 });
+
+router.get(
+  "/orders/:orderId/events",
+  limitTracking,
+  async (req, res) => {
+    const orderIdResult = z.string().uuid().safeParse(req.params.orderId);
+    const token = getBearerToken(req);
+    if (!orderIdResult.success || !token) {
+      res.status(404).json({ message: "Order not found." });
+      return;
+    }
+
+    try {
+      const accessResult = await db.query(
+        `SELECT tracking_token_hash
+         FROM orders
+         WHERE id = $1`,
+        [orderIdResult.data],
+      );
+      const expectedHash = accessResult.rows[0]?.tracking_token_hash as
+        | string
+        | undefined;
+      if (!expectedHash || !hashesMatch(expectedHash, hash(token))) {
+        res.status(404).json({ message: "Order not found." });
+        return;
+      }
+
+      res.status(200);
+      res.set({
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders();
+      res.write("retry: 1000\n\n");
+
+      let closed = false;
+      const sendStatus = (status: string) => {
+        if (!closed) {
+          try {
+            res.write(`event: status\ndata: ${JSON.stringify({ orderStatus: status })}\n\n`);
+          } catch {
+            cleanup();
+          }
+        }
+      };
+      const unsubscribe = subscribeToOrderStatus(
+        orderIdResult.data,
+        sendStatus,
+      );
+      const keepAlive = setInterval(() => {
+        if (closed) return;
+        try {
+          res.write(": keepalive\n\n");
+        } catch {
+          cleanup();
+        }
+      }, 20_000);
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        clearInterval(keepAlive);
+        unsubscribe();
+      };
+      res.on("close", cleanup);
+
+      const currentStatus = await db.query(
+        `SELECT order_status
+         FROM orders
+         WHERE id = $1`,
+        [orderIdResult.data],
+      );
+      const status = currentStatus.rows[0]?.order_status as string | undefined;
+      if (!status || closed) {
+        cleanup();
+        if (!res.writableEnded) res.end();
+        return;
+      }
+      sendStatus(status);
+    } catch (error) {
+      console.error("Customer order status stream failed", {
+        code: (error as { code?: string }).code,
+      });
+      if (!res.headersSent) {
+        res.status(500).json({ message: "Unable to open order status stream." });
+      } else {
+        res.end();
+      }
+    }
+  },
+);
 
 export default router;

@@ -50,18 +50,11 @@ export default function Dashboard() {
           : "Unable to load dashboard data.",
       );
     } finally {
-      if (requestId === requestIdRef.current) {
-      controllerRef.current = null;
-      requestInFlightRef.current = false;
-      setLoading(false);
-      }
+      if (!signal.aborted) setLoading(false);
     }
   }, [ordersOffset]);
 
   const refreshNow = useVisiblePolling(refresh, 2000);
-
-  const start = ordersTotal === 0 ? 0 : ordersOffset + 1;
-  const end = Math.min(ordersOffset + PAGE_SIZE, ordersTotal);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">

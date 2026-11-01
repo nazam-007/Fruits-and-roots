@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import {
   fetchAdminOrders,
@@ -18,12 +18,21 @@ const filters = [
   ["COMPLETED", "Completed"],
   ["CANCELLED", "Cancelled"],
 ] as const;
+const orderStatuses = ["ALL", "PLACED", "PREPARING", "READY", "COMPLETED", "CANCELLED"] as const;
+
+function isOrderStatus(value: string | null): value is (typeof orderStatuses)[number] {
+  return value !== null && orderStatuses.includes(value as (typeof orderStatuses)[number]);
+}
 
 const formatPrice = (amount: number) =>
   `₹${Number(amount).toLocaleString("en-IN")}`;
 
 export default function Orders() {
-  const [status, setStatus] = useState<"ALL" | AdminOrderStatus>("ALL");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlStatus = searchParams.get("status");
+  const status: "ALL" | AdminOrderStatus = isOrderStatus(urlStatus)
+    ? urlStatus
+    : "PLACED";
   const [items, setItems] = useState<AdminOrderRow[]>([]);
   const [total, setTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState<AdminOrderStatusCounts | null>(null);
@@ -65,10 +74,20 @@ export default function Orders() {
   const refreshNow = useVisiblePolling(refresh, 2000, `${status}:${offset}`);
 
   const setFilter = (nextStatus: "ALL" | AdminOrderStatus) => {
-    setStatus(nextStatus);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("status", nextStatus);
+    setSearchParams(nextParams);
     setOffset(0);
     setLoading(true);
   };
+
+  useEffect(() => {
+    if (!isOrderStatus(urlStatus)) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("status", "PLACED");
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [searchParams, setSearchParams, urlStatus]);
 
   const start = total === 0 ? 0 : offset + 1;
   const end = Math.min(offset + PAGE_SIZE, total);
@@ -135,7 +154,11 @@ export default function Orders() {
           <div className="p-10 text-center">
             <h2 className="font-serif text-xl font-semibold text-[#253b2a]">No orders found</h2>
             <p className="mt-1 text-sm text-[#73796d]">
-              {error ? "Orders could not be loaded. Retry to check again." : "There are no orders in this status."}
+              {error
+                ? "Orders could not be loaded. Retry to check again."
+                : status === "PLACED"
+                  ? "No new orders right now."
+                  : "There are no orders in this status."}
             </p>
           </div>
         ) : (

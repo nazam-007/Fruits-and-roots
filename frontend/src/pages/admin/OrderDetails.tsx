@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import {
   fetchAdminOrder,
@@ -21,6 +21,8 @@ const nextStatus: Partial<Record<AdminOrderStatus, "PREPARING" | "READY" | "COMP
 
 export default function AdminOrderDetails() {
   const { orderId } = useParams<{ orderId: string }>();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [order, setOrder] = useState<OrderDetailsType | null>(null);
   const [reference, setReference] = useState("");
   const [loading, setLoading] = useState(true);
@@ -64,7 +66,17 @@ export default function AdminOrderDetails() {
     setError(null);
     setNotice(null);
     try {
-      await updateAdminOrderStatus(order.id, status);
+      const result = await updateAdminOrderStatus(order.id, status);
+      if (status === "COMPLETED") {
+        if (result.orderStatus !== "COMPLETED") {
+          throw new Error("The order was not confirmed as completed.");
+        }
+        const searchParams = new URLSearchParams(location.search);
+        searchParams.set("status", "PLACED");
+        searchParams.delete("offset");
+        navigate(`/admin/orders?${searchParams.toString()}`);
+        return;
+      }
       setNotice(`Order moved to ${status}.`);
       savingRef.current = false;
       await refreshNow();
