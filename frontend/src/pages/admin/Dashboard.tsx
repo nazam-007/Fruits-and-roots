@@ -1,7 +1,12 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, CheckCircle2, ClipboardList, Clock3, IndianRupee, PackageCheck, RefreshCw, XCircle } from "lucide-react";
-import { fetchDashboard, type AdminDashboardData } from "../../services/adminApi";
+import { Activity, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Clock3, IndianRupee, PackageCheck, RefreshCw, XCircle } from "lucide-react";
+import {
+  fetchAdminOrders,
+  fetchDashboard,
+  type AdminDashboardData,
+  type AdminOrderRow,
+} from "../../services/adminApi";
 import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
 const PAGE_SIZE = 25;
@@ -25,13 +30,13 @@ export default function Dashboard() {
   const [ordersOffset, setOrdersOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const requestInFlightRef = useRef(false);
-  const requestIdRef = useRef(0);
-  const controllerRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async (signal: AbortSignal) => {
     try {
-      const latest = await fetchDashboard(signal);
+      const [latest, orderPage] = await Promise.all([
+        fetchDashboard(signal),
+        fetchAdminOrders("ALL", PAGE_SIZE, ordersOffset, signal),
+      ]);
       if (signal.aborted) return;
       setData(latest);
       setOrders(orderPage.items);
@@ -55,6 +60,8 @@ export default function Dashboard() {
   }, [ordersOffset]);
 
   const refreshNow = useVisiblePolling(refresh, 2000);
+  const start = ordersTotal === 0 ? 0 : ordersOffset + 1;
+  const end = Math.min(ordersOffset + orders.length, ordersTotal);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
