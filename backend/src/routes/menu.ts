@@ -43,8 +43,8 @@ router.get("/", async (_req, res) => {
       LEFT JOIN product_variants v
         ON p.id = v.product_id
       WHERE p.archived_at IS NULL
-      GROUP BY p.id
-      ORDER BY p.category, p.name
+      GROUP BY p.id, c.name
+      ORDER BY c.name, p.name
     `);
 
     const menu = result.rows.map((item) => ({
