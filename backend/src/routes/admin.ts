@@ -267,13 +267,21 @@ router.get("/dashboard", async (_req, res) => {
 router.get("/orders", async (req, res) => {
   const parsed = z.object({
     status: z.enum(["ALL", "PLACED", "PREPARING", "READY", "COMPLETED", "CANCELLED"]).default("ALL"),
-    limit: z.coerce.number().int().min(1).max(100).default(25),
-    offset: z.coerce.number().int().min(0).default(0),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    page: z.coerce.number().int().min(1).optional(),
+    offset: z.coerce.number().int().min(0).optional(),
   }).safeParse(req.query);
   if (!parsed.success) {
     res.status(400).json({ message: "Invalid order filter or page." });
     return;
   }
+
+  const limit =
+    parsed.data.limit ?? (parsed.data.page === undefined ? 25 : 15);
+  const offset = parsed.data.page !== undefined
+    ? (parsed.data.page - 1) * limit
+    : parsed.data.offset ?? 0;
+  const page = parsed.data.page ?? Math.floor(offset / limit) + 1;
 
   try {
     const [orders, statusCount] = await Promise.all([
@@ -284,9 +292,9 @@ router.get("/orders", async (req, res) => {
          FROM orders o
          LEFT JOIN payments p ON p.order_id = o.id
          WHERE ($1 = 'ALL' OR o.order_status = $1)
-         ORDER BY o.created_at DESC NULLS LAST
+         ORDER BY o.created_at DESC NULLS LAST, o.id DESC
          LIMIT $2 OFFSET $3`,
-        [parsed.data.status, parsed.data.limit, parsed.data.offset],
+        [parsed.data.status, limit, offset],
       ),
       db.query(
         `SELECT
@@ -307,20 +315,19 @@ router.get("/orders", async (req, res) => {
       COMPLETED: statusCount.rows[0].completed,
       CANCELLED: statusCount.rows[0].cancelled,
     };
+    const total = counts[parsed.data.status];
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const statusCounts = counts;
     res.json({
       items: orders.rows,
-      total: counts[parsed.data.status],
+      orders: orders.rows,
+      page,
+      total,
+      totalPages,
       counts,
-      limit: parsed.data.limit,
-      offset: parsed.data.offset,
-      statusCounts: {
-        ALL: statusCount.rows[0].all_orders,
-        PLACED: statusCount.rows[0].placed_orders,
-        PREPARING: statusCount.rows[0].preparing_orders,
-        READY: statusCount.rows[0].ready_orders,
-        COMPLETED: statusCount.rows[0].completed_orders,
-        CANCELLED: statusCount.rows[0].cancelled_orders,
-      },
+      limit,
+      offset,
+      statusCounts,
     });
   } catch (error) {
     console.error("Admin order list query failed", {

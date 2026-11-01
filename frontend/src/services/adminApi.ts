@@ -162,15 +162,23 @@ export function fetchAdminOrders(
   limit: number,
   offset: number,
   signal?: AbortSignal,
+  page?: number,
 ) {
   const query = new URLSearchParams({
     status,
     limit: String(limit),
-    offset: String(offset),
   });
+  if (page === undefined) {
+    query.set("offset", String(offset));
+  } else {
+    query.set("page", String(page));
+  }
   return request<{
     items: AdminOrderRow[];
+    orders: AdminOrderRow[];
+    page: number;
     total: number;
+    totalPages: number;
     counts: Record<"ALL" | AdminOrderStatus, number>;
     limit: number;
     offset: number;
