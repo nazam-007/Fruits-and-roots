@@ -32,6 +32,7 @@ const orderProgress: OrderStatus[] = [
   "READY",
   "COMPLETED",
 ];
+const terminalOrderStatuses: OrderStatus[] = ["COMPLETED", "CANCELLED"];
 
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
 const pickupMessage =
@@ -200,7 +201,7 @@ export default function OrderTracking() {
         </p>
         <button
           type="button"
-          onClick={() => void refreshStatus()}
+          onClick={() => void refreshStatus(true)}
           disabled={loading}
           className="mt-5 inline-flex min-h-11 items-center gap-2 rounded-full bg-[#31573a] px-5 font-semibold text-white disabled:opacity-50"
         >
@@ -322,7 +323,7 @@ export default function OrderTracking() {
       </section>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">
+        <section className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#b56b36]">
@@ -397,7 +398,7 @@ export default function OrderTracking() {
           )}
         </section>
 
-        <aside className="rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">
+        <aside className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">
           <h2 className="font-serif text-xl font-semibold text-[#253b2a]">
             Order details
           </h2>
@@ -410,7 +411,7 @@ export default function OrderTracking() {
             </div>
             <div className="flex justify-between gap-3">
               <dt className="text-[#73796d]">Name</dt>
-              <dd className="text-right font-medium text-[#253b2a]">
+              <dd className="min-w-0 break-all text-right font-medium text-[#253b2a]">
                 {order.customerName}
               </dd>
             </div>
@@ -438,8 +439,8 @@ export default function OrderTracking() {
                 key={`${item.productName}-${item.size}-${index}`}
                 className="flex justify-between gap-3 text-sm"
               >
-                <div>
-                  <p className="font-medium text-[#394b38]">
+                <div className="min-w-0">
+                  <p className="break-all font-medium text-[#394b38]">
                     {item.productName}
                   </p>
                   <p className="text-xs text-[#7a8074]">

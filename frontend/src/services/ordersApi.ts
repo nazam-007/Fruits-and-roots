@@ -1,4 +1,4 @@
-import type { CartItem } from "../context/CartContext";
+import type { CartItem } from "../context/cartContextStore";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 

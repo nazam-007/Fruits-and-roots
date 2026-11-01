@@ -327,6 +327,7 @@ export default function MenuManagement() {
           {visibleProducts.map((product) => {
             const regular = product.variants.find((variant) => variant.size === "Regular")?.price;
             const large = product.variants.find((variant) => variant.size === "Large")?.price;
+            const hasRegularPrice = Number.isSafeInteger(regular) && (regular ?? 0) > 0;
             const busy = busyProductId === product.id;
             const productImage = product.image ?? getMenuItemImage({
               id: product.id,
@@ -355,11 +356,16 @@ export default function MenuManagement() {
                       {large !== undefined && <span className="block text-xs font-normal text-gray-500">Large ₹{large}</span>}
                     </p>
                   </div>
+                  {!hasRegularPrice && !product.archived && (
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">
+                      Add a Regular price in Edit before making this item available.
+                    </p>
+                  )}
                   {product.description && <p className="line-clamp-2 text-sm text-gray-600">{product.description}</p>}
                   {!product.archived && (
                     <div className="flex flex-wrap gap-2 border-t border-gray-100 pt-3">
                       {(["AVAILABLE", "SOLD_OUT", "COMING_SOON"] as const).map((status) => (
-                        <button key={status} type="button" disabled={busy} onClick={() => void changeStatus(product, status)} className={`min-h-9 rounded-lg border px-2.5 text-xs font-semibold disabled:opacity-50 ${product.availabilityStatus === status ? "border-[#354632] bg-[#edf1e6] text-[#354632]" : "border-gray-200 text-gray-600 hover:border-[#354632]"}`}>
+                        <button key={status} type="button" disabled={busy || (status === "AVAILABLE" && !hasRegularPrice)} title={status === "AVAILABLE" && !hasRegularPrice ? "Add a Regular price before marking this item available." : undefined} onClick={() => void changeStatus(product, status)} className={`min-h-9 rounded-lg border px-2.5 text-xs font-semibold disabled:opacity-50 ${product.availabilityStatus === status ? "border-[#354632] bg-[#edf1e6] text-[#354632]" : "border-gray-200 text-gray-600 hover:border-[#354632]"}`}>
                           {busy && product.availabilityStatus !== status ? <LoaderCircle className="inline animate-spin" size={13} /> : product.availabilityStatus === status ? <Check className="mr-1 inline" size={13} /> : null}
                           {statusLabels[status]}
                         </button>

@@ -15,6 +15,13 @@ router.get("/", async (_req, res) => {
         p.availability_status,
         p.description,
         p.featured,
+        EXISTS (
+          SELECT 1
+          FROM product_variants regular_variant
+          WHERE regular_variant.product_id = p.id
+            AND regular_variant.size = 'Regular'
+            AND regular_variant.price > 0
+        ) AS has_regular_price,
         COALESCE(
           json_agg(
             json_build_object(
@@ -43,7 +50,9 @@ router.get("/", async (_req, res) => {
       name: item.name,
       category: item.category,
       image: item.image_url,
-      available: item.availability_status === "AVAILABLE",
+      available:
+        item.availability_status === "AVAILABLE" &&
+        item.has_regular_price === true,
       availabilityStatus: item.availability_status,
       description: item.description,
       featured: item.featured,

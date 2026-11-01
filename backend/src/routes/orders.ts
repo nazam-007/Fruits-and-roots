@@ -940,6 +940,7 @@ router.post(
 );
 
 router.get("/orders/:orderId", limitTracking, async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
   const orderIdResult = z.string().uuid().safeParse(req.params.orderId);
   const token = req.get("authorization")?.match(/^Bearer ([A-Za-z0-9_-]{40,128})$/)?.[1];
   if (!orderIdResult.success || !token) {

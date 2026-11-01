@@ -13,6 +13,7 @@ export function useVisiblePolling(
   const inFlightRef = useRef(false);
   const pendingRef = useRef(false);
   const controllerRef = useRef<AbortController | null>(null);
+  const runRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     callbackRef.current = callback;

@@ -6,7 +6,7 @@ import {
   ShoppingBag,
 } from "lucide-react";
 import { Link, NavLink, Outlet } from "react-router-dom";
-import { useCart } from "../context/CartContext";
+import { useCart } from "../context/useCart";
 
 const directionsUrl =
   "https://www.google.com/maps/search/?api=1&query=H76V%2BJ22%2C%20New%20Delhi";

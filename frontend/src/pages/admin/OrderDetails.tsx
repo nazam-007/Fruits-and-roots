@@ -173,11 +173,11 @@ export default function AdminOrderDetails() {
       </Link>
 
       <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs font-semibold uppercase tracking-[0.15em] text-[#b56b36]">
             Order details
           </p>
-          <h1 className="mt-1 font-serif text-3xl font-semibold text-[#253b2a]">
+          <h1 className="mt-1 break-all font-serif text-3xl font-semibold text-[#253b2a]">
             {order.order_number}
           </h1>
         </div>
@@ -202,7 +202,7 @@ export default function AdminOrderDetails() {
         <section className="rounded-2xl border border-[#e7e4d8] bg-white p-5 shadow-sm">
           <h2 className="font-serif text-xl font-semibold text-[#253b2a]">Customer</h2>
           <dl className="mt-4 space-y-3 text-sm">
-            <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Name</dt><dd className="text-right font-medium">{order.customer_name}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="shrink-0 text-[#73796d]">Name</dt><dd className="min-w-0 break-all text-right font-medium">{order.customer_name}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Phone</dt><dd className="text-right font-medium">{order.customer_phone || "Not provided"}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Pickup type</dt><dd className="font-medium">{order.fulfillment_type === "PICKUP" ? "Counter pickup" : "Table"}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Placed</dt><dd className="text-right font-medium">{new Date(order.created_at).toLocaleString()}</dd></div>
@@ -305,8 +305,8 @@ export default function AdminOrderDetails() {
           <ul className="mt-5 divide-y divide-[#eeece4] border-t border-[#eeece4]">
             {order.items.map((item, index) => (
               <li key={`${item.productId}-${item.size}-${index}`} className="flex justify-between gap-4 py-3 text-sm">
-                <div>
-                  <p className="font-medium text-[#394b38]">{item.productName}</p>
+                <div className="min-w-0">
+                  <p className="break-all font-medium text-[#394b38]">{item.productName}</p>
                   <p className="text-xs text-[#73796d]">{item.size} · Qty {item.quantity} · {formatPrice(item.unitPrice)} each</p>
                 </div>
                 <span className="shrink-0 font-semibold tabular-nums">{formatPrice(item.unitPrice * item.quantity)}</span>
