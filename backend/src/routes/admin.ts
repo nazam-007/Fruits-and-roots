@@ -13,6 +13,7 @@ import {
 } from "../adminPassword";
 import { db } from "../db";
 import { publishOrderStatus } from "../orderStatusEvents";
+import { publishCatalogChange } from "../catalogEvents";
 
 const router = Router();
 const SESSION_COOKIE = "fr_admin_session";
@@ -1123,6 +1124,94 @@ router.patch("/menu/:productId/archive", async (req, res) => {
       code: (error as { code?: string }).code,
     });
     res.status(500).json({ message: "Unable to update this menu item." });
+  }
+});
+
+router.delete("/menu/:productId", async (req, res) => {
+  const productId = productIdSchema.safeParse(req.params.productId);
+  if (!productId.success) {
+    res.status(400).json({ message: "Invalid menu item." });
+    return;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const product = await client.query(
+      "SELECT id, name FROM products WHERE id = $1 FOR UPDATE",
+      [productId.data],
+    );
+    if (!product.rows[0]) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ message: "Menu item not found." });
+      return;
+    }
+
+    const orderItem = await client.query(
+      "SELECT 1 FROM order_items WHERE product_id = $1 LIMIT 1",
+      [productId.data],
+    );
+    if (orderItem.rowCount) {
+      await client.query(
+        "UPDATE products SET archived_at = COALESCE(archived_at, NOW()) WHERE id = $1",
+        [productId.data],
+      );
+      await client.query("COMMIT");
+      publishCatalogChange();
+      res.json({
+        deleted: false,
+        archived: true,
+        message: `${product.rows[0].name} was removed from the active menu. Historical orders have been retained.`,
+      });
+      return;
+    }
+
+    await client.query("DELETE FROM product_variants WHERE product_id = $1", [
+      productId.data,
+    ]);
+    await client.query("DELETE FROM products WHERE id = $1", [productId.data]);
+    await client.query("COMMIT");
+    publishCatalogChange();
+    res.json({
+      deleted: true,
+      archived: false,
+      message: `${product.rows[0].name} was deleted.`,
+    });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    const code = (error as { code?: string }).code;
+    if (code === "23503") {
+      try {
+        const archived = await db.query(
+          `UPDATE products
+           SET archived_at = COALESCE(archived_at, NOW())
+           WHERE id = $1
+           RETURNING name`,
+          [productId.data],
+        );
+        if (!archived.rowCount) {
+          res.status(404).json({ message: "Menu item not found." });
+          return;
+        }
+        publishCatalogChange();
+        res.json({
+          deleted: false,
+          archived: true,
+          message: `${archived.rows[0].name} was removed from the active menu. Existing records have been retained.`,
+        });
+        return;
+      } catch (archiveError) {
+        console.error("Admin menu product archive fallback failed", {
+          code: (archiveError as { code?: string }).code,
+        });
+        res.status(500).json({ message: "Unable to remove this menu item." });
+        return;
+      }
+    }
+    console.error("Admin menu product deletion failed", { code });
+    res.status(500).json({ message: "Unable to remove this menu item." });
+  } finally {
+    client.release();
   }
 });
 

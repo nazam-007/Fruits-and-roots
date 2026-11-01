@@ -23,6 +23,7 @@ type MenuContextType = {
 const MenuContext = createContext<MenuContextType | undefined>(
   undefined
 );
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export function MenuProvider({
   children,
@@ -34,9 +35,16 @@ export function MenuProvider({
   const [error, setError] = useState<string | null>(null);
   const hasLoadedMenu = useRef(false);
   const requestInFlight = useRef(false);
+  const refreshQueued = useRef(false);
+  const refreshMenuRef = useRef<(quiet?: boolean) => Promise<void>>(
+    () => Promise.resolve(),
+  );
 
   const refreshMenu = useCallback(async (quiet = false) => {
-    if (requestInFlight.current) return;
+    if (requestInFlight.current) {
+      refreshQueued.current = true;
+      return;
+    }
     requestInFlight.current = true;
     if (!quiet) setLoading(true);
     setError(null);
@@ -52,11 +60,19 @@ export function MenuProvider({
     } finally {
       requestInFlight.current = false;
       setLoading(false);
+      if (refreshQueued.current) {
+        refreshQueued.current = false;
+        window.setTimeout(() => void refreshMenuRef.current(true), 0);
+      }
     }
   }, []);
 
   useEffect(() => {
+    refreshMenuRef.current = refreshMenu;
     const initialLoad = window.setTimeout(() => void refreshMenu(), 0);
+    const menuEvents = new EventSource(`${API_URL}/api/menu/events`);
+    const refreshOnCatalogChange = () => void refreshMenu(true);
+    menuEvents.addEventListener("catalog-changed", refreshOnCatalogChange);
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void refreshMenu(true);
     }, 10_000);
@@ -67,6 +83,8 @@ export function MenuProvider({
     return () => {
       window.clearTimeout(initialLoad);
       window.clearInterval(interval);
+      menuEvents.removeEventListener("catalog-changed", refreshOnCatalogChange);
+      menuEvents.close();
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [refreshMenu]);

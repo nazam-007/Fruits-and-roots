@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test src/adminPassword.test.ts src/server.security.test.ts",
+    "test": "tsx --test src/adminPassword.test.ts src/catalogEvents.test.ts src/server.security.test.ts",
     "dev": "tsx watch src/server.ts",
     "admin:hash-password": "tsx src/generateAdminPasswordHash.ts",
     "build": "tsc",

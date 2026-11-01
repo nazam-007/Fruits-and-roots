@@ -46,6 +46,7 @@ test("unauthenticated admin APIs and image uploads are rejected", async (t) => {
     ["category reorder", "/api/admin/categories/order", "PUT"],
     ["category deletion", "/api/admin/categories/00000000-0000-4000-8000-000000000001", "DELETE"],
     ["product price change", "/api/admin/menu/test-product", "PATCH"],
+    ["product deletion", "/api/admin/menu/test-product", "DELETE"],
     ["menu image upload", "/api/admin/menu/test-product/image", "POST"],
   ] as const) {
     await t.test(name, async () => {
@@ -53,6 +54,16 @@ test("unauthenticated admin APIs and image uploads are rejected", async (t) => {
       assert.equal(response.status, 401);
     });
   }
+});
+
+test("public catalog change stream supports Server-Sent Events", async () => {
+  const controller = new AbortController();
+  const response = await fetch(`${baseUrl}/api/menu/events`, {
+    signal: controller.signal,
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/);
+  controller.abort();
 });
 
 test("admin login accepts a 64-character password without truncation", async () => {

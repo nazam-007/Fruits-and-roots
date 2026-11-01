@@ -310,6 +310,14 @@ export function updateAdminMenuArchive(productId: string, archived: boolean) {
   );
 }
 
+export function deleteAdminMenuProduct(productId: string) {
+  return request<{
+    deleted: boolean;
+    archived: boolean;
+    message: string;
+  }>(`/menu/${encodeURIComponent(productId)}`, { method: "DELETE" });
+}
+
 export function uploadAdminMenuImage(productId: string, dataUrl: string) {
   return request<{ imageUrl: string }>(
     `/menu/${encodeURIComponent(productId)}/image`,

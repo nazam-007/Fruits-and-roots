@@ -1,8 +1,49 @@
 
 import { Router } from "express";
 import { db } from "../db";
+import { subscribeToCatalogChanges } from "../catalogEvents";
 
 const router = Router();
+
+router.get("/events", (_req, res) => {
+  res.status(200);
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.flushHeaders();
+  res.write("retry: 1000\n\n");
+
+  let closed = false;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(keepAlive);
+    unsubscribe();
+  };
+  const sendChange = () => {
+    if (closed) return;
+    try {
+      res.write("event: catalog-changed\ndata: {}\n\n");
+    } catch {
+      cleanup();
+    }
+  };
+  const unsubscribe = subscribeToCatalogChanges(sendChange);
+  const keepAlive = setInterval(() => {
+    if (closed) return;
+    try {
+      res.write(": keepalive\n\n");
+    } catch {
+      cleanup();
+    }
+  }, 20_000);
+
+  res.on("close", cleanup);
+  res.on("error", cleanup);
+});
 
 router.get("/", async (_req, res) => {
   try {
