@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import {
@@ -7,6 +7,7 @@ import {
   type AdminOrderStatus,
   type AdminOrderStatusCounts,
 } from "../../services/adminApi";
+import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
 const PAGE_SIZE = 25;
 const filters = [
@@ -27,85 +28,46 @@ export default function Orders() {
   const [total, setTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState<AdminOrderStatusCounts | null>(null);
   const [offset, setOffset] = useState(0);
+  const [counts, setCounts] = useState<Record<"ALL" | AdminOrderStatus, number>>({
+    ALL: 0,
+    PLACED: 0,
+    PREPARING: 0,
+    READY: 0,
+    COMPLETED: 0,
+    CANCELLED: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const requestInFlightRef = useRef(false);
-  const requestIdRef = useRef(0);
-  const controllerRef = useRef<AbortController | null>(null);
 
-  const refresh = useCallback(async (showLoading = false) => {
-    if (
-      document.visibilityState === "hidden" ||
-      requestInFlightRef.current
-    ) {
-      return;
-    }
-
-    const requestId = ++requestIdRef.current;
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    requestInFlightRef.current = true;
-    if (showLoading) setLoading(true);
+  const refresh = useCallback(async (signal: AbortSignal) => {
     try {
-      const page = await fetchAdminOrders(
-        status,
-        PAGE_SIZE,
-        offset,
-        controller.signal,
-      );
-      if (requestId !== requestIdRef.current) return;
+      const page = await fetchAdminOrders(status, PAGE_SIZE, offset, signal);
+      if (signal.aborted) return;
       setItems(page.items);
       setTotal(page.total);
-      setStatusCounts(page.statusCounts);
+      setCounts(page.counts);
       setError(null);
       if (offset > 0 && offset >= page.total) {
-        setOffset(Math.max(0, Math.ceil(page.total / PAGE_SIZE) - 1) * PAGE_SIZE);
+        setOffset(Math.max(0, Math.floor((page.total - 1) / PAGE_SIZE) * PAGE_SIZE));
       }
     } catch (requestError) {
-      if (controller.signal.aborted || requestId !== requestIdRef.current) {
-        return;
-      }
+      if (signal.aborted) return;
       setError(
         requestError instanceof Error
           ? requestError.message
           : "Unable to load orders.",
       );
     } finally {
-      if (requestId === requestIdRef.current) {
-        controllerRef.current = null;
-        requestInFlightRef.current = false;
-        setLoading(false);
-      }
+      if (!signal.aborted) setLoading(false);
     }
   }, [offset, status]);
 
-  useEffect(() => {
-    const initialTimeout = window.setTimeout(() => void refresh(true), 0);
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-        void refresh();
-      }
-    }, 2000);
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void refresh();
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      window.clearTimeout(initialTimeout);
-      window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      requestIdRef.current += 1;
-      controllerRef.current?.abort();
-      controllerRef.current = null;
-      requestInFlightRef.current = false;
-    };
-  }, [refresh]);
+  const refreshNow = useVisiblePolling(refresh, 2000, `${status}:${offset}`);
 
   const setFilter = (nextStatus: "ALL" | AdminOrderStatus) => {
     setStatus(nextStatus);
     setOffset(0);
+    setLoading(true);
   };
 
   const start = total === 0 ? 0 : offset + 1;
@@ -124,7 +86,10 @@ export default function Orders() {
         </div>
         <button
           type="button"
-          onClick={() => void refresh(true)}
+          onClick={() => {
+            setLoading(true);
+            void refreshNow();
+          }}
           disabled={loading}
           className="inline-flex min-h-10 items-center gap-2 rounded-full border border-[#dfe3d8] bg-white px-4 text-sm font-semibold text-[#31573a] disabled:opacity-50"
         >
@@ -146,7 +111,7 @@ export default function Orders() {
                 : "border border-[#dfe3d8] bg-white text-[#596554] hover:bg-[#f2f4ed]"
             }`}
           >
-            {statusCounts ? `${label} (${statusCounts[filter]})` : label}
+            {label} <span className="ml-1 text-xs opacity-75">{counts[filter]}</span>
           </button>
         ))}
       </div>
@@ -154,7 +119,10 @@ export default function Orders() {
       {error && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           <p role="alert">{error}</p>
-          <button type="button" onClick={() => void refresh(true)} className="font-semibold underline">
+          <button type="button" onClick={() => {
+            setLoading(true);
+            void refreshNow();
+          }} className="font-semibold underline">
             Retry
           </button>
         </div>
@@ -241,7 +209,7 @@ export default function Orders() {
           </div>
         </footer>
       </section>
-      <p className="text-xs text-[#858a7e]">Orders and status counts refresh automatically every 2 seconds while this page is visible.</p>
+      <p className="text-xs text-[#858a7e]">Orders and status counts refresh automatically every 2 seconds.</p>
     </div>
   );
 }

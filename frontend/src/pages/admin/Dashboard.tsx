@@ -1,24 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Clock3, IndianRupee, PackageCheck, RefreshCw } from "lucide-react";
-import {
-  fetchAdminOrders,
-  fetchDashboard,
-  type AdminDashboardData,
-  type AdminOrderRow,
-} from "../../services/adminApi";
+import { Activity, CheckCircle2, ClipboardList, Clock3, IndianRupee, PackageCheck, RefreshCw, XCircle } from "lucide-react";
+import { fetchDashboard, type AdminDashboardData } from "../../services/adminApi";
+import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
 const PAGE_SIZE = 25;
 const formatPrice = (amount: number) =>
   `₹${Number(amount).toLocaleString("en-IN")}`;
 
 const cards = [
-  { key: "all_orders", label: "All orders", icon: ClipboardList },
+  { key: "total_orders", label: "All Orders", icon: ClipboardList },
   { key: "total_orders_today", label: "Orders today", icon: Activity },
   { key: "new_orders", label: "New orders", icon: Clock3 },
   { key: "preparing_orders", label: "Preparing", icon: RefreshCw },
   { key: "ready_orders", label: "Ready for pickup", icon: PackageCheck },
   { key: "completed_orders", label: "Completed", icon: CheckCircle2 },
+  { key: "cancelled_orders", label: "Cancelled", icon: XCircle },
 ] as const;
 
 export default function Dashboard() {
@@ -32,24 +29,10 @@ export default function Dashboard() {
   const requestIdRef = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (
-      document.visibilityState === "hidden" ||
-      requestInFlightRef.current
-    ) {
-      return;
-    }
-
-    const requestId = ++requestIdRef.current;
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    requestInFlightRef.current = true;
+  const refresh = useCallback(async (signal: AbortSignal) => {
     try {
-      const [latest, orderPage] = await Promise.all([
-        fetchDashboard(controller.signal),
-        fetchAdminOrders("ALL", PAGE_SIZE, ordersOffset, controller.signal),
-      ]);
-      if (requestId !== requestIdRef.current) return;
+      const latest = await fetchDashboard(signal);
+      if (signal.aborted) return;
       setData(latest);
       setOrders(orderPage.items);
       setOrdersTotal(orderPage.total);
@@ -60,9 +43,7 @@ export default function Dashboard() {
         );
       }
     } catch (requestError) {
-      if (controller.signal.aborted || requestId !== requestIdRef.current) {
-        return;
-      }
+      if (signal.aborted) return;
       setError(
         requestError instanceof Error
           ? requestError.message
@@ -77,29 +58,7 @@ export default function Dashboard() {
     }
   }, [ordersOffset]);
 
-  useEffect(() => {
-    const initialTimeout = window.setTimeout(() => void refresh(), 0);
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === "visible") {
-      void refresh();
-      }
-    }, 2000);
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-      void refresh();
-      }
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      window.clearTimeout(initialTimeout);
-      window.clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      requestIdRef.current += 1;
-      controllerRef.current?.abort();
-      controllerRef.current = null;
-      requestInFlightRef.current = false;
-    };
-  }, [refresh]);
+  const refreshNow = useVisiblePolling(refresh, 2000);
 
   const start = ordersTotal === 0 ? 0 : ordersOffset + 1;
   const end = Math.min(ordersOffset + PAGE_SIZE, ordersTotal);
@@ -120,7 +79,7 @@ export default function Dashboard() {
         </div>
         <span className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-2 text-xs font-medium text-[#596554] shadow-sm">
           <span className="h-2 w-2 animate-pulse rounded-full bg-[#5d8a4c]" />
-          Updates every 2 seconds while visible
+          Updates every 2 seconds
         </span>
       </header>
 
@@ -129,7 +88,7 @@ export default function Dashboard() {
           <p role="alert">{error}</p>
           <button
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => void refreshNow()}
             className="font-semibold underline"
           >
             Retry
@@ -139,7 +98,7 @@ export default function Dashboard() {
 
       <section
         aria-label="Order statistics"
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6"
+        className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
       >
         {cards.map(({ key, label, icon: Icon }) => (
           <article key={key} className="rounded-2xl border border-[#e7e4d8] bg-white p-4 shadow-sm">
@@ -247,7 +206,7 @@ export default function Dashboard() {
           </div>
         ) : (
           <p className="p-6 text-sm text-[#73796d]">
-            {error ? "Orders are temporarily unavailable." : "No orders found."}
+            {error ? "Recent orders are temporarily unavailable." : "No orders yet."}
           </p>
         )}
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#eeece4] px-4 py-3 text-sm text-[#73796d]">

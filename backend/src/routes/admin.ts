@@ -275,7 +275,7 @@ router.get("/orders", async (req, res) => {
   }
 
   try {
-    const [orders, count, statusCount] = await Promise.all([
+    const [orders, counts] = await Promise.all([
       db.query(
         `SELECT o.id, o.order_number, o.customer_name, o.customer_phone,
                 o.fulfillment_type, o.total_amount, o.payment_status,
@@ -288,10 +288,14 @@ router.get("/orders", async (req, res) => {
         [parsed.data.status, parsed.data.limit, parsed.data.offset],
       ),
       db.query(
-        `SELECT COUNT(*)::int AS total
-         FROM orders
-         WHERE ($1 = 'ALL' OR order_status = $1)`,
-        [parsed.data.status],
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE order_status = 'PLACED')::int AS placed,
+           COUNT(*) FILTER (WHERE order_status = 'PREPARING')::int AS preparing,
+           COUNT(*) FILTER (WHERE order_status = 'READY')::int AS ready,
+           COUNT(*) FILTER (WHERE order_status = 'COMPLETED')::int AS completed,
+           COUNT(*) FILTER (WHERE order_status = 'CANCELLED')::int AS cancelled
+         FROM orders`,
       ),
       db.query(
         `SELECT
@@ -304,9 +308,18 @@ router.get("/orders", async (req, res) => {
          FROM orders`,
       ),
     ]);
+    const statusCounts = {
+      ALL: counts.rows[0].total,
+      PLACED: counts.rows[0].placed,
+      PREPARING: counts.rows[0].preparing,
+      READY: counts.rows[0].ready,
+      COMPLETED: counts.rows[0].completed,
+      CANCELLED: counts.rows[0].cancelled,
+    };
     res.json({
       items: orders.rows,
-      total: count.rows[0].total,
+      total: statusCounts[parsed.data.status],
+      counts: statusCounts,
       limit: parsed.data.limit,
       offset: parsed.data.offset,
       statusCounts: {

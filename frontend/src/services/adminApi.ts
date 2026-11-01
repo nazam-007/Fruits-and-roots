@@ -49,12 +49,13 @@ export type AdminOrderDetails = AdminOrderRow & {
 
 export type AdminDashboardData = {
   summary: {
-    all_orders: number;
+    total_orders: number;
     total_orders_today: number;
     new_orders: number;
     preparing_orders: number;
     ready_orders: number;
     completed_orders: number;
+    cancelled_orders: number;
     verified_revenue_today: number;
     demo_revenue_today: number;
   };
@@ -153,10 +154,7 @@ export function logoutAdmin() {
 }
 
 export function fetchDashboard(signal?: AbortSignal) {
-  return request<AdminDashboardData>(
-    "/dashboard",
-    { signal, cache: "no-store" },
-  );
+  return request<AdminDashboardData>("/dashboard", { signal });
 }
 
 export function fetchAdminOrders(
@@ -173,19 +171,16 @@ export function fetchAdminOrders(
   return request<{
     items: AdminOrderRow[];
     total: number;
+    counts: Record<"ALL" | AdminOrderStatus, number>;
     limit: number;
     offset: number;
-    statusCounts: AdminOrderStatusCounts;
-  }>(
-    `/orders?${query}`,
-    { signal, cache: "no-store" },
-  );
+  }>(`/orders?${query}`, { signal });
 }
 
 export function fetchAdminOrder(orderId: string, signal?: AbortSignal) {
   return request<AdminOrderDetails>(
     `/orders/${encodeURIComponent(orderId)}`,
-    { signal, cache: "no-store" },
+    { signal },
   );
 }
 
