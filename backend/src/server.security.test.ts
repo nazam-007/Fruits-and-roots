@@ -69,6 +69,32 @@ test("customer tracking requires an order tracking token", async () => {
   assert.equal(response.status, 404);
 });
 
+test("order quote validates new and legacy fulfillment inputs before database access", async (t) => {
+  const invalidDineInTable = await fetch(`${baseUrl}/api/orders/quote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      orderType: "DINE_IN",
+      tableNumber: "A-2",
+      items: [{ productId: "test-product", size: "Regular", quantity: 1 }],
+    }),
+  });
+  assert.equal(invalidDineInTable.status, 400);
+
+  await t.test("legacy table orders still require a table number", async () => {
+    const response = await fetch(`${baseUrl}/api/orders/quote`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fulfillmentType: "TABLE",
+        items: [{ productId: "test-product", size: "Regular", quantity: 1 }],
+      }),
+    });
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).message, /table number is required/i);
+  });
+});
+
 test("disallowed admin origin is rejected", async () => {
   const response = await fetch(`${baseUrl}/api/admin/auth/login`, {
     method: "POST",

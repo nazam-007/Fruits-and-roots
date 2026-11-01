@@ -187,7 +187,11 @@ export default function Payment() {
 
       <header className="mb-6 sm:mb-8">
         <p className="mb-1 break-all text-xs font-semibold uppercase tracking-[0.16em] text-[#b56b36]">
-          Counter pickup · {order.orderNumber}
+          {(order.orderType ??
+            (order.fulfillmentType === "TABLE" ? "DINE_IN" : "TAKEAWAY")) ===
+          "DINE_IN"
+            ? `Dine-in${order.tableNumber ? ` · Table ${order.tableNumber}` : ""} · ${order.orderNumber}`
+            : `Takeaway · ${order.orderNumber}`}
         </p>
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#253b2a] sm:text-4xl">
           Complete Your Payment

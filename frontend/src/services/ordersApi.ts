@@ -9,6 +9,8 @@ export type OrderStatus =
   | "COMPLETED"
   | "CANCELLED";
 
+export type OrderType = "TAKEAWAY" | "DINE_IN";
+
 export type PaymentStatus =
   | "PENDING_PAYMENT"
   | "PENDING_VERIFICATION"
@@ -31,6 +33,7 @@ export type OrderDetails = {
   customerName: string;
   fulfillmentType: "PICKUP" | "TABLE";
   tableNumber: string | null;
+  orderType?: OrderType;
   totalAmount: number;
   paymentStatus: PaymentStatus;
   paymentSource: PaymentSource;
@@ -94,7 +97,8 @@ export async function fetchPaymentConfiguration(): Promise<{
 }
 
 export async function requestPaymentQuote(input: {
-  fulfillmentType: "PICKUP" | "TABLE";
+  orderType?: OrderType;
+  fulfillmentType?: "PICKUP" | "TABLE";
   tableNumber?: string;
   items: Array<{
     productId: string;
@@ -115,7 +119,8 @@ export async function submitOrder(
   input: {
     customerName: string;
     customerPhone?: string;
-    fulfillmentType: "PICKUP" | "TABLE";
+    orderType?: OrderType;
+    fulfillmentType?: "PICKUP" | "TABLE";
     tableNumber?: string;
     items: Array<{
       productId: string;

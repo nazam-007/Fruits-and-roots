@@ -36,8 +36,12 @@ const orderProgress: OrderStatus[] = [
   "COMPLETED",
 ];
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
-const pickupMessage =
-  "Your order has been received. Please wait while restaurant staff verify your payment and prepare your items. We will call your name when your order is ready.";
+function getOrderType(order: OrderDetails): "TAKEAWAY" | "DINE_IN" {
+  return (
+    order.orderType ??
+    (order.fulfillmentType === "TABLE" ? "DINE_IN" : "TAKEAWAY")
+  );
+}
 
 export default function OrderTracking() {
   const { orderId } = useParams<{ orderId: string }>();
@@ -217,6 +221,7 @@ export default function OrderTracking() {
   const currentStep = orderProgress.indexOf(order.orderStatus);
   const isCancelled = order.orderStatus === "CANCELLED";
   const isPaid = order.paymentStatus === "PAID";
+  const orderType = getOrderType(order);
   const createdAt = new Date(order.createdAt);
   const orderedProductIds = new Set(order.items.map((item) => item.productId));
   const orderedCategories = new Set(
@@ -346,23 +351,29 @@ export default function OrderTracking() {
               order.paymentStatus === "PAID" ? (
                 <>
                   Your demo order has been placed successfully! The merchant
-                  will announce your name when the order is ready.
+                  {orderType === "TAKEAWAY"
+                    ? " will announce your name when the order is ready for pickup."
+                    : " will prepare your order for you to enjoy at the café."}
                 </>
               ) : order.orderStatus === "READY"
-                ? "Your order is ready! Please collect it from the counter."
-                : order.fulfillmentType === "PICKUP"
+                ? orderType === "TAKEAWAY"
+                  ? "Your order is ready! Please collect it from the counter."
+                  : "Your order is ready to enjoy at the café."
+                : orderType === "TAKEAWAY"
                   ? order.paymentStatus === "PENDING_PAYMENT"
                     ? "Your order is awaiting payment. Restaurant staff will confirm the payment status."
                     : order.paymentStatus === "PENDING_VERIFICATION"
-                    ? pickupMessage
-                    : order.paymentStatus === "PAID"
-                      ? "Your payment has been verified. We will call your name when your order is ready for counter pickup."
-                      : "Restaurant staff could not verify your payment. Please speak with them before collecting your order."
+                      ? "Your order has been received. Restaurant staff will verify your payment and prepare your items. We will call your name when it is ready for pickup."
+                      : order.paymentStatus === "PAID"
+                        ? "Your payment has been verified. We will call your name when your order is ready for pickup."
+                        : "Restaurant staff could not verify your payment. Please speak with them before collecting your order."
                   : order.paymentStatus === "PENDING_VERIFICATION"
                     ? "We have received your order and UPI transaction reference. Restaurant staff will verify your payment."
                     : order.paymentStatus === "PAID"
                       ? "Restaurant staff have verified your payment."
-                      : "Restaurant staff could not verify this payment. Please speak with them."}
+                      : order.paymentStatus === "PENDING_PAYMENT"
+                        ? "Your order is awaiting payment. Restaurant staff will confirm the payment status."
+                        : "Restaurant staff could not verify this payment. Please speak with them."}
             </p>
           </div>
         </div>
@@ -376,16 +387,18 @@ export default function OrderTracking() {
                 Preparation status
               </p>
               <h2 className="mt-1 font-serif text-2xl font-semibold text-[#253b2a]">
-                {orderStatusLabels[order.orderStatus]}
+                {order.orderStatus === "READY" && orderType === "DINE_IN"
+                  ? "Ready to enjoy"
+                  : orderStatusLabels[order.orderStatus]}
               </h2>
             </div>
-            {order.fulfillmentType === "PICKUP" ? (
+            {orderType === "TAKEAWAY" ? (
               <span className="rounded-full bg-[#edf1e6] px-3 py-1 text-xs font-semibold text-[#31573a]">
-                Counter Pickup
+                Takeaway
               </span>
             ) : (
               <span className="rounded-full bg-[#edf1e6] px-3 py-1 text-xs font-semibold text-[#31573a]">
-                Table {order.tableNumber}
+                {order.tableNumber ? `Dine-in · Table ${order.tableNumber}` : "Dine-in"}
               </span>
             )}
           </div>
@@ -418,7 +431,9 @@ export default function OrderTracking() {
                           : "text-[#858a7e]"
                     }`}
                   >
-                    {orderStatusLabels[status]}
+                    {status === "READY" && orderType === "DINE_IN"
+                      ? "Ready to enjoy"
+                      : orderStatusLabels[status]}
                   </span>
                 </li>
               );
@@ -462,11 +477,13 @@ export default function OrderTracking() {
               </dd>
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-[#73796d]">Pickup type</dt>
+              <dt className="text-[#73796d]">Order type</dt>
               <dd className="font-medium text-[#253b2a]">
-                {order.fulfillmentType === "PICKUP"
-                  ? "Counter Pickup"
-                  : `Table ${order.tableNumber ?? ""}`}
+                {orderType === "TAKEAWAY"
+                  ? "Takeaway"
+                  : order.tableNumber
+                    ? `Dine-in · Table ${order.tableNumber}`
+                    : "Dine-in"}
               </dd>
             </div>
             <div className="flex justify-between gap-3">

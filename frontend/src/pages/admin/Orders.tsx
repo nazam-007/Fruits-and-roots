@@ -32,6 +32,15 @@ function isValidDateFilter(value: string | null): value is string {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
+function formatFulfillment(order: AdminOrderRow) {
+  const orderType =
+    order.order_type ??
+    (order.fulfillment_type === "TABLE" ? "DINE_IN" : "TAKEAWAY");
+  return orderType === "DINE_IN"
+    ? `Dine-in${order.table_number ? ` · Table ${order.table_number}` : ""}`
+    : "Takeaway";
+}
+
 export default function Orders() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlStatus = searchParams.get("status");
@@ -235,7 +244,7 @@ export default function Orders() {
                     <td className="px-4 py-3 tabular-nums">{formatPrice(order.total_amount)}</td>
                     <td className="px-4 py-3">{order.payment_status.replaceAll("_", " ")}</td>
                     <td className="px-4 py-3">{order.order_status}</td>
-                    <td className="px-4 py-3">{order.fulfillment_type === "PICKUP" ? "Counter pickup" : "Table"}</td>
+                    <td className="px-4 py-3">{formatFulfillment(order)}</td>
                     <td className="px-4 py-3 text-[#73796d]">
                       {new Date(order.created_at).toLocaleString()}
                     </td>

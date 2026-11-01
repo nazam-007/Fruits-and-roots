@@ -288,7 +288,8 @@ router.get("/orders", async (req, res) => {
     const [orders, statusCount] = await Promise.all([
       db.query(
         `SELECT o.id, o.order_number, o.customer_name, o.customer_phone,
-                o.fulfillment_type, o.total_amount, o.payment_status,
+                o.fulfillment_type, o.order_type, o.table_number,
+                o.total_amount, o.payment_status,
                 o.order_status, o.created_at, p.payment_source
          FROM orders o
          LEFT JOIN payments p ON p.order_id = o.id
@@ -360,7 +361,8 @@ router.get("/orders/:orderId", async (req, res) => {
   try {
     const result = await db.query(
       `SELECT o.id, o.order_number, o.customer_name, o.customer_phone,
-              o.fulfillment_type, o.total_amount, o.payment_status,
+              o.fulfillment_type, o.order_type, o.table_number,
+              o.total_amount, o.payment_status,
               o.order_status, o.created_at,
               p.payment_status AS recorded_payment_status,
               p.payment_source, p.transaction_reference,
