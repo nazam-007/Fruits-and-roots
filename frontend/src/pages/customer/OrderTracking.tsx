@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Check, Clock3, RefreshCw, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Clock3, RefreshCw, ShieldCheck } from "lucide-react";
+import MenuItemImage from "../../components/customer/MenuItemImage";
+import { useMenu } from "../../context/MenuContext";
+import type { MenuItem } from "../../data/menu";
 import {
   cancelOrder,
   fetchOrder,
@@ -40,6 +43,7 @@ const pickupMessage =
 
 export default function OrderTracking() {
   const { orderId } = useParams<{ orderId: string }>();
+  const { menuItems, loading: menuLoading, error: menuError } = useMenu();
   const [order, setOrder] = useState<OrderDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -216,6 +220,50 @@ export default function OrderTracking() {
   const isCancelled = order.orderStatus === "CANCELLED";
   const isPaid = order.paymentStatus === "PAID";
   const createdAt = new Date(order.createdAt);
+  const orderedProductIds = new Set(order.items.map((item) => item.productId));
+  const orderedCategories = new Set(
+    order.items
+      .map((orderItem) =>
+        menuItems.find((menuItem) => menuItem.id === orderItem.productId)?.category,
+      )
+      .filter((category): category is string => Boolean(category)),
+  );
+  const availableProductIds = new Set<string>();
+  const availableProducts = menuItems.filter((item) => {
+    if (
+      !item.available ||
+      item.variants.length === 0 ||
+      availableProductIds.has(item.id)
+    ) {
+      return false;
+    }
+
+    availableProductIds.add(item.id);
+    return true;
+  });
+  const notAlreadyOrdered = availableProducts.filter(
+    (item) => !orderedProductIds.has(item.id),
+  );
+  const complementaryProducts = notAlreadyOrdered.filter(
+    (item) => !orderedCategories.has(item.category),
+  );
+  const sameCategoryProducts = notAlreadyOrdered.filter((item) =>
+    orderedCategories.has(item.category),
+  );
+  const recommendations: MenuItem[] = [
+    ...complementaryProducts,
+    ...sameCategoryProducts,
+  ].slice(0, 4);
+  if (recommendations.length < 2) {
+    const recommendedIds = new Set(recommendations.map((item) => item.id));
+    for (const item of availableProducts) {
+      if (!recommendedIds.has(item.id)) {
+        recommendations.push(item);
+        recommendedIds.add(item.id);
+      }
+      if (recommendations.length === 2) break;
+    }
+  }
 
   return (
     <div className="mx-auto max-w-4xl pb-24 sm:pb-8">
@@ -461,6 +509,114 @@ export default function OrderTracking() {
           </div>
         </aside>
       </div>
+
+      {!isCancelled && (
+        <section
+          aria-labelledby="recommendations-heading"
+          className="mt-8 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6"
+        >
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <h2
+                id="recommendations-heading"
+                className="font-serif text-2xl font-semibold text-[#253b2a]"
+              >
+                Craving Something More? 🥤
+              </h2>
+              <p className="mt-1 text-sm leading-6 text-[#73796d]">
+                Make your wait a little tastier. Explore something delicious!
+              </p>
+            </div>
+            <Link
+              to="/menu"
+              className="inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full border border-[#dfe3d8] px-4 text-sm font-semibold text-[#31573a] transition hover:bg-[#f2f4ed]"
+            >
+              Explore menu
+              <ArrowRight size={16} aria-hidden="true" />
+            </Link>
+          </div>
+
+          {order.orderStatus === "COMPLETED" ? (
+            <p className="mt-4 text-sm text-[#596554]">
+              Ready for another fresh favorite? Explore the menu to start a separate order.
+            </p>
+          ) : menuLoading && menuItems.length === 0 ? (
+            <p role="status" className="mt-4 text-sm text-[#73796d]">
+              Loading menu suggestions...
+            </p>
+          ) : menuError && menuItems.length === 0 ? (
+            <p role="alert" className="mt-4 text-sm text-[#73796d]">
+              Suggestions are temporarily unavailable. You can still explore the menu.
+            </p>
+          ) : recommendations.length === 0 ? (
+            <p className="mt-4 text-sm text-[#73796d]">
+              No available suggestions right now. Explore the menu to see what’s fresh.
+            </p>
+          ) : (
+            <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {recommendations.map((item) => {
+                const startingPrice = Math.min(
+                  ...item.variants.map((variant) => variant.price),
+                );
+                return (
+                  <article
+                    key={item.id}
+                    className="min-w-0 overflow-hidden rounded-2xl border border-[#eeece4] bg-[#fdfcf9]"
+                  >
+                    <Link
+                      to={`/product/${item.id}`}
+                      aria-label={`Order more ${item.name}`}
+                      className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#b56b36]"
+                    >
+                      <div className="relative aspect-[4/3] overflow-hidden bg-[#e9eddf]">
+                        <MenuItemImage
+                          item={item}
+                          width={600}
+                          height={450}
+                          imageClassName="absolute inset-0 h-full w-full object-cover"
+                          fallbackClassName="absolute inset-0 flex items-center justify-center text-5xl"
+                        />
+                      </div>
+                    </Link>
+                    <div className="flex min-h-[150px] flex-col p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-[#b56b36]">
+                        {item.category}
+                      </p>
+                      <h3 className="mt-1 break-words font-semibold text-[#253b2a]">
+                        {item.name}
+                      </h3>
+                      <p className="mt-1 text-sm font-semibold text-[#31573a]">
+                        From {formatPrice(startingPrice)}
+                      </p>
+                      {item.description && (
+                        <p className="mt-2 line-clamp-2 text-xs leading-5 text-[#73796d]">
+                          {item.description}
+                        </p>
+                      )}
+                      <Link
+                        to={`/product/${item.id}`}
+                        className="mt-auto inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-[#31573a] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#25472e] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2"
+                      >
+                        Order More
+                        <ArrowRight size={15} aria-hidden="true" />
+                      </Link>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+
+          {order.orderStatus !== "COMPLETED" &&
+            !menuLoading &&
+            !menuError &&
+            recommendations.length < 2 && (
+              <p className="mt-4 text-sm text-[#73796d]">
+                Want more choices? Explore the full menu.
+              </p>
+            )}
+        </section>
+      )}
     </div>
   );
 }
