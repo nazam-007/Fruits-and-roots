@@ -37,6 +37,7 @@ after(async () => {
 test("unauthenticated admin APIs and image uploads are rejected", async (t) => {
   for (const [name, path, method] of [
     ["dashboard", "/api/admin/dashboard", "GET"],
+    ["order list", "/api/admin/orders?page=1&limit=15", "GET"],
     ["order status update", "/api/admin/orders/00000000-0000-4000-8000-000000000001/status", "PATCH"],
     ["payment verification", "/api/admin/orders/00000000-0000-4000-8000-000000000001/payment-verification", "POST"],
     ["product price change", "/api/admin/menu/test-product", "PATCH"],

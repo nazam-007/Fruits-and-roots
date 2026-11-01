@@ -8,7 +8,7 @@ import {
 } from "../../services/adminApi";
 import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 15;
 const filters = [
   ["ALL", "All"],
   ["PLACED", "New"],
@@ -32,9 +32,12 @@ export default function Orders() {
   const status: "ALL" | AdminOrderStatus = isOrderStatus(urlStatus)
     ? urlStatus
     : "PLACED";
+  const pageParam = searchParams.get("page");
+  const parsedPage = pageParam === null ? 1 : Number(pageParam);
+  const pageNumber =
+    Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
   const [items, setItems] = useState<AdminOrderRow[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
   const [counts, setCounts] = useState<Record<"ALL" | AdminOrderStatus, number>>({
     ALL: 0,
     PLACED: 0,
@@ -48,14 +51,23 @@ export default function Orders() {
 
   const refresh = useCallback(async (signal: AbortSignal) => {
     try {
-      const page = await fetchAdminOrders(status, PAGE_SIZE, offset, signal);
+      const offset = (pageNumber - 1) * PAGE_SIZE;
+      const result = await fetchAdminOrders(
+        status,
+        PAGE_SIZE,
+        offset,
+        signal,
+        pageNumber,
+      );
       if (signal.aborted) return;
-      setItems(page.items);
-      setTotal(page.total);
-      setCounts(page.counts);
+      setItems(result.items);
+      setTotal(result.total);
+      setCounts(result.counts);
       setError(null);
-      if (offset > 0 && offset >= page.total) {
-        setOffset(Math.max(0, Math.floor((page.total - 1) / PAGE_SIZE) * PAGE_SIZE));
+      if (pageNumber > result.totalPages) {
+        const nextParams = new URLSearchParams(searchParams);
+        nextParams.set("page", String(result.totalPages));
+        setSearchParams(nextParams, { replace: true });
       }
     } catch (requestError) {
       if (signal.aborted) return;
@@ -67,28 +79,40 @@ export default function Orders() {
     } finally {
       if (!signal.aborted) setLoading(false);
     }
-  }, [offset, status]);
+  }, [pageNumber, searchParams, setSearchParams, status]);
 
-  const refreshNow = useVisiblePolling(refresh, 2000, `${status}:${offset}`);
+  const refreshNow = useVisiblePolling(refresh, 2000, `${status}:${pageNumber}`);
 
   const setFilter = (nextStatus: "ALL" | AdminOrderStatus) => {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set("status", nextStatus);
+    nextParams.set("page", "1");
     setSearchParams(nextParams);
-    setOffset(0);
+    setLoading(true);
+  };
+
+  const setPage = (nextPage: number) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("page", String(nextPage));
+    setSearchParams(nextParams);
     setLoading(true);
   };
 
   useEffect(() => {
-    if (!isOrderStatus(urlStatus)) {
+    const validPageParam =
+      pageParam === null ||
+      (Number.isInteger(Number(pageParam)) && Number(pageParam) > 0);
+    if (!isOrderStatus(urlStatus) || !validPageParam) {
       const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("status", "PLACED");
+      if (!isOrderStatus(urlStatus)) nextParams.set("status", "PLACED");
+      if (!validPageParam) nextParams.set("page", "1");
       setSearchParams(nextParams, { replace: true });
     }
-  }, [searchParams, setSearchParams, urlStatus]);
+  }, [pageParam, searchParams, setSearchParams, urlStatus]);
 
-  const start = total === 0 ? 0 : offset + 1;
-  const end = Math.min(offset + PAGE_SIZE, total);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const start = total === 0 ? 0 : (pageNumber - 1) * PAGE_SIZE + 1;
+  const end = Math.min(pageNumber * PAGE_SIZE, total);
 
   return (
     <div className="mx-auto max-w-7xl space-y-5">
@@ -161,7 +185,7 @@ export default function Orders() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table id="admin-orders-table" className="w-full min-w-[900px] text-left text-sm">
               <thead className="bg-[#f8f8f2] text-xs uppercase tracking-wide text-[#73796d]">
                 <tr>
                   <th className="px-4 py-3">Order</th>
@@ -207,22 +231,27 @@ export default function Orders() {
         )}
 
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-[#eeece4] px-4 py-3 text-sm text-[#73796d]">
-          <span>{start}–{end} of {total}</span>
+          <div>
+            <p>Showing {start}–{end} of {total} orders</p>
+            <p className="mt-1 text-xs">Page {pageNumber} of {totalPages}</p>
+          </div>
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-              disabled={offset === 0 || loading}
+              onClick={() => setPage(Math.max(1, pageNumber - 1))}
+              disabled={pageNumber <= 1 || loading}
               aria-label="Previous page"
+              aria-controls="admin-orders-table"
               className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#dfe3d8] disabled:opacity-40"
             >
               <ChevronLeft size={17} aria-hidden="true" />
             </button>
             <button
               type="button"
-              onClick={() => setOffset(offset + PAGE_SIZE)}
-              disabled={offset + PAGE_SIZE >= total || loading}
+              onClick={() => setPage(pageNumber + 1)}
+              disabled={pageNumber >= totalPages || loading}
               aria-label="Next page"
+              aria-controls="admin-orders-table"
               className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-[#dfe3d8] disabled:opacity-40"
             >
               <ChevronRight size={17} aria-hidden="true" />
