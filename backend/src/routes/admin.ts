@@ -574,7 +574,8 @@ const productIdSchema = z.string().min(1).max(120).regex(/^[A-Za-z0-9_&-]+$/);
 
 async function getAdminMenuProduct(productId: string) {
   const result = await db.query(
-    `SELECT p.id, p.name, p.description, c.name AS category, p.image_url,
+    `SELECT p.id, p.name, p.description, p.category_id,
+            c.name AS category, p.image_url,
             p.availability_status, p.featured, p.archived_at,
             COALESCE(
               json_agg(json_build_object('size', v.size, 'price', v.price)
@@ -593,6 +594,7 @@ async function getAdminMenuProduct(productId: string) {
   if (!row) return null;
   return {
     id: row.id as string,
+    categoryId: row.category_id as string,
     name: row.name as string,
     description: (row.description as string | null) ?? null,
     category: row.category as string,
@@ -607,6 +609,7 @@ async function getAdminMenuProduct(productId: string) {
 function menuProductResponse(row: Record<string, unknown>) {
   return {
     id: row.id,
+    categoryId: row.category_id,
     name: row.name,
     description: row.description ?? null,
     category: row.category,
@@ -621,9 +624,9 @@ function menuProductResponse(row: Record<string, unknown>) {
 router.get("/categories", async (_req, res) => {
   try {
     const result = await db.query(
-      `SELECT id, name
+      `SELECT id, name, sort_order AS "sortOrder"
        FROM categories
-       ORDER BY lower(name), name`,
+       ORDER BY sort_order, lower(name), id`,
     );
     res.json(result.rows);
   } catch (error) {
@@ -643,15 +646,21 @@ router.post("/categories", async (req, res) => {
     return;
   }
 
+  const client = await db.connect();
   try {
-    const result = await db.query(
-      `INSERT INTO categories (name)
-       VALUES ($1)
-       RETURNING id, name`,
+    await client.query("BEGIN");
+    await client.query("LOCK TABLE categories IN EXCLUSIVE MODE");
+    const result = await client.query(
+      `INSERT INTO categories (name, sort_order)
+       SELECT $1, COALESCE(MAX(sort_order) + 1, 0)
+       FROM categories
+       RETURNING id, name, sort_order AS "sortOrder"`,
       [parsed.data.name],
     );
+    await client.query("COMMIT");
     res.status(201).json(result.rows[0]);
   } catch (error) {
+    await client.query("ROLLBACK");
     const code = (error as { code?: string }).code;
     if (code === "23505") {
       res.status(409).json({ message: "A category with this name already exists." });
@@ -659,6 +668,177 @@ router.post("/categories", async (req, res) => {
     }
     console.error("Admin category creation failed", { code });
     res.status(500).json({ message: "Unable to create the category." });
+  } finally {
+    client.release();
+  }
+});
+
+const categoryIdSchema = z.string().uuid();
+
+router.patch("/categories/:categoryId", async (req, res) => {
+  const categoryId = categoryIdSchema.safeParse(req.params.categoryId);
+  const parsed = z.object({
+    name: z.string().trim().min(1).max(80),
+  }).strict().safeParse(req.body);
+  if (!categoryId.success || !parsed.success) {
+    res.status(400).json({ message: "Enter a valid category name." });
+    return;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const lockedCategory = await client.query(
+      "SELECT id FROM categories WHERE id = $1 FOR UPDATE",
+      [categoryId.data],
+    );
+    if (!lockedCategory.rows[0]) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ message: "Category not found." });
+      return;
+    }
+    const category = await client.query(
+      `UPDATE categories
+       SET name = $2
+       WHERE id = $1
+       RETURNING id, name, sort_order AS "sortOrder"`,
+      [categoryId.data, parsed.data.name],
+    );
+    await client.query(
+      `UPDATE products
+       SET category = $2
+       WHERE category_id = $1`,
+      [categoryId.data, category.rows[0].name],
+    );
+    await client.query("COMMIT");
+    res.json(category.rows[0]);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    const code = (error as { code?: string }).code;
+    if (code === "23505") {
+      res.status(409).json({ message: "A category with this name already exists." });
+      return;
+    }
+    console.error("Admin category rename failed", { code });
+    res.status(500).json({ message: "Unable to rename the category." });
+  } finally {
+    client.release();
+  }
+});
+
+router.put("/categories/order", async (req, res) => {
+  const parsed = z.object({
+    categoryIds: z.array(categoryIdSchema).max(500),
+  }).strict().safeParse(req.body);
+  if (
+    !parsed.success ||
+    new Set(parsed.data.categoryIds).size !== parsed.data.categoryIds.length
+  ) {
+    res.status(400).json({ message: "Provide each category exactly once in the new order." });
+    return;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("LOCK TABLE categories IN EXCLUSIVE MODE");
+    const current = await client.query(
+      "SELECT id FROM categories ORDER BY sort_order, id",
+    );
+    const currentIds = current.rows.map((row) => row.id as string);
+    if (
+      currentIds.length !== parsed.data.categoryIds.length ||
+      currentIds.some((id) => !parsed.data.categoryIds.includes(id))
+    ) {
+      await client.query("ROLLBACK");
+      res.status(409).json({
+        message: "The category list changed. Refresh and try reordering again.",
+      });
+      return;
+    }
+
+    await client.query(
+      `UPDATE categories
+       SET sort_order = sort_order + (
+         SELECT COALESCE(MAX(sort_order), -1) + COUNT(*) + 1 FROM categories
+       )`,
+    );
+    await client.query(
+      `UPDATE categories AS category
+       SET sort_order = ordered.ordinality - 1
+       FROM unnest($1::uuid[]) WITH ORDINALITY AS ordered(id, ordinality)
+       WHERE category.id = ordered.id`,
+      [parsed.data.categoryIds],
+    );
+    const updated = await client.query(
+      `SELECT id, name, sort_order AS "sortOrder"
+       FROM categories
+       ORDER BY sort_order, id`,
+    );
+    await client.query("COMMIT");
+    res.json(updated.rows);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Admin category reorder failed", {
+      code: (error as { code?: string }).code,
+    });
+    res.status(500).json({ message: "Unable to reorder categories." });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete("/categories/:categoryId", async (req, res) => {
+  const categoryId = categoryIdSchema.safeParse(req.params.categoryId);
+  if (!categoryId.success) {
+    res.status(400).json({ message: "Invalid category ID." });
+    return;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const category = await client.query(
+      "SELECT id, name FROM categories WHERE id = $1 FOR UPDATE",
+      [categoryId.data],
+    );
+    if (!category.rows[0]) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ message: "Category not found." });
+      return;
+    }
+    const products = await client.query(
+      "SELECT COUNT(*)::int AS count FROM products WHERE category_id = $1",
+      [categoryId.data],
+    );
+    const productCount = Number(products.rows[0].count);
+    if (productCount > 0) {
+      await client.query("ROLLBACK");
+      res.status(409).json({
+        message: `Cannot delete ${category.rows[0].name} because ${productCount} ${productCount === 1 ? "product is" : "products are"} assigned to it. Reassign those products before deleting this category.`,
+        productCount,
+      });
+      return;
+    }
+    await client.query(
+      "DELETE FROM categories WHERE id = $1",
+      [categoryId.data],
+    );
+    await client.query("COMMIT");
+    res.status(204).end();
+  } catch (error) {
+    await client.query("ROLLBACK");
+    const code = (error as { code?: string }).code;
+    if (code === "23503") {
+      res.status(409).json({
+        message: "This category is now in use. Reassign its products before deleting it.",
+      });
+      return;
+    }
+    console.error("Admin category deletion failed", { code });
+    res.status(500).json({ message: "Unable to delete the category." });
+  } finally {
+    client.release();
   }
 });
 
@@ -666,7 +846,8 @@ router.get("/menu", async (req, res) => {
   const includeArchived = req.query.includeArchived === "true";
   try {
     const result = await db.query(
-      `SELECT p.id, p.name, p.description, c.name AS category, p.image_url,
+      `SELECT p.id, p.name, p.description, p.category_id,
+              c.name AS category, p.image_url,
               p.availability_status, p.featured, p.archived_at,
               COALESCE(
                 json_agg(json_build_object('size', v.size, 'price', v.price)
@@ -678,8 +859,8 @@ router.get("/menu", async (req, res) => {
        JOIN categories c ON c.id = p.category_id
        LEFT JOIN product_variants v ON v.product_id = p.id
        WHERE $1::boolean OR p.archived_at IS NULL
-       GROUP BY p.id, c.name
-       ORDER BY p.archived_at NULLS FIRST, p.category, p.name`,
+       GROUP BY p.id, c.name, c.sort_order
+       ORDER BY p.archived_at NULLS FIRST, c.sort_order, c.name, p.name`,
       [includeArchived],
     );
     res.json(result.rows.map((row) => menuProductResponse(row)));

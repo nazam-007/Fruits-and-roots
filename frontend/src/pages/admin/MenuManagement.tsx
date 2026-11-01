@@ -2,12 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import {
   Archive,
   Check,
+  ChevronDown,
+  ChevronUp,
   ImagePlus,
   LoaderCircle,
   Pencil,
   Plus,
   Search,
   Star,
+  Trash2,
   Undo2,
 } from "lucide-react";
 import { calculateLargePrice } from "../../data/menu";
@@ -17,11 +20,14 @@ import {
   AdminApiError,
   createAdminCategory,
   createAdminMenuProduct,
+  deleteAdminCategory,
   fetchAdminCategories,
   fetchAdminMenu,
+  reorderAdminCategories,
   updateAdminMenuArchive,
   updateAdminMenuProduct,
   updateAdminMenuStatus,
+  updateAdminCategory,
   uploadAdminMenuImage,
   type AdminMenuProduct,
   type AdminMenuProductInput,
@@ -95,11 +101,13 @@ export default function MenuManagement() {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [showArchived, setShowArchived] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
-  const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [categoryDialogMode, setCategoryDialogMode] = useState<"create" | "rename" | null>(null);
   const [categoryName, setCategoryName] = useState("");
   const [categorySaving, setCategorySaving] = useState(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
   const [createCategoryForForm, setCreateCategoryForForm] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<AdminCategory | null>(null);
+  const [categoryBusy, setCategoryBusy] = useState(false);
   const [editing, setEditing] = useState<AdminMenuProduct | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [largePriceManual, setLargePriceManual] = useState(false);
@@ -183,16 +191,14 @@ export default function MenuManagement() {
     try {
       const created = await createAdminCategory(name);
       setCategories((current) =>
-        [...current, created].sort((left, right) =>
-          left.name.localeCompare(right.name),
-        ),
+        [...current, created].sort((left, right) => left.sortOrder - right.sortOrder),
       );
       setCategoryFilter(created.name);
       if (createCategoryForForm) {
         setForm((current) => ({ ...current, category: created.name }));
       }
       setCategoryName("");
-      setCategoryDialogOpen(false);
+      setCategoryDialogMode(null);
       setCreateCategoryForForm(false);
       setNotice(`Category "${created.name}" created.`);
     } catch (createError) {
@@ -205,8 +211,116 @@ export default function MenuManagement() {
   const openCategoryDialog = (forProductForm = false) => {
     setCategoryName("");
     setCategoryError(null);
+    setEditingCategory(null);
     setCreateCategoryForForm(forProductForm);
-    setCategoryDialogOpen(true);
+    setCategoryDialogMode("create");
+  };
+
+  const openRenameCategory = (category: AdminCategory) => {
+    setEditingCategory(category);
+    setCategoryName(category.name);
+    setCategoryError(null);
+    setCreateCategoryForForm(false);
+    setCategoryDialogMode("rename");
+  };
+
+  const handleRenameCategory = async (name: string) => {
+    if (!editingCategory) return;
+    setCategorySaving(true);
+    setCategoryError(null);
+    try {
+      const updated = await updateAdminCategory(editingCategory.id, name);
+      setCategories((current) =>
+        current.map((category) =>
+          category.id === updated.id ? updated : category,
+        ),
+      );
+      setProducts((current) =>
+        current.map((product) =>
+          product.categoryId === updated.id
+            ? { ...product, category: updated.name }
+            : product,
+        ),
+      );
+      setCategoryFilter((current) =>
+        current === editingCategory.name ? updated.name : current,
+      );
+      setForm((current) =>
+        current.category === editingCategory.name
+          ? { ...current, category: updated.name }
+          : current,
+      );
+      setEditing((current) =>
+        current?.categoryId === updated.id
+          ? { ...current, category: updated.name }
+          : current,
+      );
+      setCategoryDialogMode(null);
+      setEditingCategory(null);
+      setNotice(`Category renamed to "${updated.name}".`);
+      await refreshMenu(true);
+    } catch (renameError) {
+      setCategoryError(requestMessage(renameError));
+    } finally {
+      setCategorySaving(false);
+    }
+  };
+
+  const moveCategory = async (categoryIndex: number, direction: -1 | 1) => {
+    const targetIndex = categoryIndex + direction;
+    if (targetIndex < 0 || targetIndex >= categories.length || categoryBusy) return;
+    const reordered = [...categories];
+    [reordered[categoryIndex], reordered[targetIndex]] = [
+      reordered[targetIndex],
+      reordered[categoryIndex],
+    ];
+    setCategoryBusy(true);
+    setError(null);
+    try {
+      const updated = await reorderAdminCategories(
+        reordered.map((category) => category.id),
+      );
+      setCategories(updated);
+      setNotice("Category order saved.");
+      await refreshMenu(true);
+    } catch (reorderError) {
+      setError(requestMessage(reorderError));
+      try {
+        setCategories(await fetchAdminCategories());
+      } catch (loadError) {
+        setError(`${requestMessage(reorderError)} ${requestMessage(loadError)}`);
+      }
+    } finally {
+      setCategoryBusy(false);
+    }
+  };
+
+  const removeCategory = async (category: AdminCategory) => {
+    if (
+      categoryBusy ||
+      !window.confirm(`Delete "${category.name}"? This category can only be deleted if no products use it.`)
+    ) {
+      return;
+    }
+    setCategoryBusy(true);
+    setError(null);
+    try {
+      await deleteAdminCategory(category.id);
+      const remaining = categories.filter((item) => item.id !== category.id);
+      setCategories(remaining);
+      if (categoryFilter === category.name) setCategoryFilter("ALL");
+      setForm((current) =>
+        current.category === category.name
+          ? { ...current, category: remaining[0]?.name ?? "" }
+          : current,
+      );
+      setNotice(`Category "${category.name}" deleted.`);
+      await refreshMenu(true);
+    } catch (deleteError) {
+      setError(requestMessage(deleteError));
+    } finally {
+      setCategoryBusy(false);
+    }
   };
 
   const openEdit = (product: AdminMenuProduct) => {
@@ -351,36 +465,120 @@ export default function MenuManagement() {
       {notice && <p role="status" className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">{notice}</p>}
       {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
 
-      {categoryDialogOpen && (
+      <section
+        aria-labelledby="category-management-title"
+        className="rounded-2xl border border-[#e7e4d8] bg-white p-4 shadow-sm sm:p-5"
+      >
+        <div className="mb-3">
+          <h2 id="category-management-title" className="font-semibold text-[#354632]">
+            Categories
+          </h2>
+          <p className="mt-1 text-xs text-gray-500">
+            Change names, adjust display order, or delete categories with no assigned products.
+          </p>
+        </div>
+        <ol className="space-y-2">
+          {categories.map((category, index) => (
+            <li
+              key={category.id}
+              className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-100 p-2.5 sm:flex-nowrap"
+            >
+              <span className="min-w-0 flex-1 truncate text-sm font-medium text-[#354632]">
+                {category.name}
+              </span>
+              <div className="flex flex-wrap items-center gap-1">
+                <button
+                  type="button"
+                  aria-label={`Move ${category.name} up`}
+                  title="Move up"
+                  disabled={index === 0 || categoryBusy}
+                  onClick={() => void moveCategory(index, -1)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-[#354632] hover:bg-[#f3f5ef] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronUp size={17} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Move ${category.name} down`}
+                  title="Move down"
+                  disabled={index === categories.length - 1 || categoryBusy}
+                  onClick={() => void moveCategory(index, 1)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-gray-200 text-[#354632] hover:bg-[#f3f5ef] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ChevronDown size={17} aria-hidden="true" />
+                </button>
+                <button
+                  type="button"
+                  disabled={categoryBusy}
+                  onClick={() => openRenameCategory(category)}
+                  className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-gray-200 px-2.5 text-xs font-semibold text-[#354632] hover:bg-[#f3f5ef] disabled:opacity-40"
+                >
+                  <Pencil size={14} aria-hidden="true" />
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  disabled={categoryBusy}
+                  onClick={() => void removeCategory(category)}
+                  className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-red-100 px-2.5 text-xs font-semibold text-red-800 hover:bg-red-50 disabled:opacity-40"
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      {categoryDialogMode && (
         <div
           className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-5"
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget && !categorySaving) {
-              setCategoryDialogOpen(false);
+              setCategoryDialogMode(null);
+              setEditingCategory(null);
             }
           }}
         >
           <form
             role="dialog"
             aria-modal="true"
-            aria-labelledby="create-category-title"
-            onSubmit={(event) => void handleCreateCategory(event)}
+            aria-labelledby="category-dialog-title"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (categoryDialogMode === "rename") {
+                const name = categoryName.trim();
+                if (!name) {
+                  setCategoryError("Enter a category name.");
+                  return;
+                }
+                void handleRenameCategory(name);
+              } else {
+                void handleCreateCategory(event);
+              }
+            }}
             className="w-full max-w-md space-y-4 rounded-t-2xl bg-white p-5 sm:rounded-2xl sm:p-6"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h2 id="create-category-title" className="text-xl font-bold text-[#354632]">
-                  Add Category
+                <h2 id="category-dialog-title" className="text-xl font-bold text-[#354632]">
+                  {categoryDialogMode === "rename" ? "Rename Category" : "Add Category"}
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">
-                  New categories can be assigned to menu items.
+                  {categoryDialogMode === "rename"
+                    ? "Products assigned to this category will stay linked."
+                    : "New categories can be assigned to menu items."}
                 </p>
               </div>
               <button
                 type="button"
                 disabled={categorySaving}
-                onClick={() => setCategoryDialogOpen(false)}
+                onClick={() => {
+                  setCategoryDialogMode(null);
+                  setEditingCategory(null);
+                }}
                 className="min-h-10 rounded-lg px-3 text-sm font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50"
               >
                 Close
@@ -408,7 +606,9 @@ export default function MenuManagement() {
               className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#354632] px-4 font-semibold text-white hover:bg-[#263524] disabled:opacity-50"
             >
               {categorySaving && <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />}
-              {categorySaving ? "Creating category..." : "Create Category"}
+              {categorySaving
+                ? categoryDialogMode === "rename" ? "Saving name..." : "Creating category..."
+                : categoryDialogMode === "rename" ? "Save Name" : "Create Category"}
             </button>
           </form>
         </div>

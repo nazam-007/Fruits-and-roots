@@ -68,6 +68,7 @@ export type AdminMenuProduct = {
   id: string;
   name: string;
   description: string | null;
+  categoryId: string;
   category: string;
   image: string | null;
   availabilityStatus: "AVAILABLE" | "SOLD_OUT" | "COMING_SOON";
@@ -79,6 +80,7 @@ export type AdminMenuProduct = {
 export type AdminCategory = {
   id: string;
   name: string;
+  sortOrder: number;
 };
 
 export type AdminMenuProductInput = {
@@ -251,6 +253,27 @@ export function createAdminCategory(name: string) {
     method: "POST",
     body: JSON.stringify({ name }),
   });
+}
+
+export function updateAdminCategory(categoryId: string, name: string) {
+  return request<AdminCategory>(
+    `/categories/${encodeURIComponent(categoryId)}`,
+    { method: "PATCH", body: JSON.stringify({ name }) },
+  );
+}
+
+export function reorderAdminCategories(categoryIds: string[]) {
+  return request<AdminCategory[]>("/categories/order", {
+    method: "PUT",
+    body: JSON.stringify({ categoryIds }),
+  });
+}
+
+export function deleteAdminCategory(categoryId: string) {
+  return request<void>(
+    `/categories/${encodeURIComponent(categoryId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function createAdminMenuProduct(input: AdminMenuProductInput) {

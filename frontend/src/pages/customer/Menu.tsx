@@ -9,28 +9,44 @@ export default function Menu() {
   const { menuItems, loading, error, refreshMenu } = useMenu();
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState("All");
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 
+  const menuCategories = useMemo(
+    () => {
+      const seen = new Set<string>();
+      return menuItems.reduce<Array<{ id: string; name: string }>>(
+        (result, item) => {
+          if (!item.category) return result;
+          const id = item.categoryId ?? `category-name:${item.category}`;
+          if (!seen.has(id)) {
+            seen.add(id);
+            result.push({ id, name: item.category });
+          }
+          return result;
+        },
+        [],
+      );
+    },
+    [menuItems],
+  );
+  const selectedCategoryId =
+    activeCategoryId !== null &&
+    menuCategories.some((category) => category.id === activeCategoryId)
+      ? activeCategoryId
+      : null;
   const filteredItems = useMemo(() => {
     return menuItems.filter((item) => {
       const matchesSearch = item.name
         .toLowerCase()
         .includes(searchQuery.trim().toLowerCase());
 
+      const itemCategoryId = item.categoryId ?? `category-name:${item.category}`;
       const matchesCategory =
-        activeCategory === "All" ||
-        item.category === activeCategory;
+        selectedCategoryId === null || itemCategoryId === selectedCategoryId;
 
       return matchesSearch && matchesCategory;
     });
-  }, [menuItems, searchQuery, activeCategory]);
-  const menuCategories = useMemo(
-    () =>
-      [...new Set(menuItems.map((item) => item.category).filter(Boolean))].sort(
-        (left, right) => left.localeCompare(right),
-      ),
-    [menuItems],
-  );
+  }, [menuItems, searchQuery, selectedCategoryId]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-8 pb-24">
@@ -72,19 +88,19 @@ export default function Menu() {
       {/* Category filters */}
       <div className="sticky top-16 z-30 -mx-4 border-b border-gray-100 bg-[#FAF8F2]/95 px-4 py-3 backdrop-blur-md">
         <div className="mx-auto flex max-w-5xl gap-3 overflow-x-auto pb-1">
-          {["All", ...menuCategories].map((category) => (
+          {[{ id: null, name: "All" }, ...menuCategories].map((category) => (
             <button
-              key={category}
+              key={category.id ?? "all"}
               type="button"
-              onClick={() => setActiveCategory(category)}
-              aria-pressed={activeCategory === category}
+              onClick={() => setActiveCategoryId(category.id)}
+              aria-pressed={selectedCategoryId === category.id}
               className={`shrink-0 rounded-full px-5 py-2.5 text-sm font-medium transition-all duration-200 ${
-                activeCategory === category
+                selectedCategoryId === category.id
                   ? "bg-[#354632] text-white shadow-md"
                   : "border border-gray-200 bg-white text-gray-600 hover:border-[#354632] hover:text-[#354632]"
               }`}
             >
-              {category === "All" ? "All Items" : category}
+              {category.id === null ? "All Items" : category.name}
             </button>
           ))}
         </div>
@@ -184,7 +200,7 @@ export default function Menu() {
             type="button"
             onClick={() => {
               setSearchQuery("");
-              setActiveCategory("All");
+              setActiveCategoryId(null);
             }}
             className="mt-5 rounded-xl bg-[#354632] px-6 py-3 font-medium text-white"
           >

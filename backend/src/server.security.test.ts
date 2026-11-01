@@ -42,6 +42,9 @@ test("unauthenticated admin APIs and image uploads are rejected", async (t) => {
     ["payment verification", "/api/admin/orders/00000000-0000-4000-8000-000000000001/payment-verification", "POST"],
     ["category list", "/api/admin/categories", "GET"],
     ["category creation", "/api/admin/categories", "POST"],
+    ["category rename", "/api/admin/categories/00000000-0000-4000-8000-000000000001", "PATCH"],
+    ["category reorder", "/api/admin/categories/order", "PUT"],
+    ["category deletion", "/api/admin/categories/00000000-0000-4000-8000-000000000001", "DELETE"],
     ["product price change", "/api/admin/menu/test-product", "PATCH"],
     ["menu image upload", "/api/admin/menu/test-product/image", "POST"],
   ] as const) {

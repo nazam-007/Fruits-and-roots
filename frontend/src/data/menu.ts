@@ -8,6 +8,7 @@ export type AvailabilityStatus = "AVAILABLE" | "SOLD_OUT" | "COMING_SOON";
 
 export type MenuItem = {
   id: string;
+  categoryId?: string;
   name: string;
   category: string;
   variants: MenuVariant[];
