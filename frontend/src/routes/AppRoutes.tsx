@@ -17,6 +17,7 @@ import AdminDashboard from "../pages/admin/Dashboard";
 import AdminOrders from "../pages/admin/Orders";
 import AdminOrderDetails from "../pages/admin/OrderDetails";
 import MenuManagement from "../pages/admin/MenuManagement";
+import AdminSettings from "../pages/admin/Settings";
 
 const Page = ({ title }: { title: string }) => (
   <div className="rounded-xl bg-white p-8 shadow-sm">
@@ -88,7 +89,7 @@ export default function AppRoutes() {
           <Route path="menu" element={<MenuManagement />} />
           <Route path="tables" element={<Page title="Table Management" />} />
           <Route path="reports" element={<Page title="Reports" />} />
-          <Route path="settings" element={<Page title="Settings" />} />
+          <Route path="settings" element={<AdminSettings />} />
         </Route>
 
         {/* Fallback Route */}

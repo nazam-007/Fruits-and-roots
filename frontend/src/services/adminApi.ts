@@ -1,3 +1,5 @@
+import type { OpeningHours, RestaurantOrderingStatus } from "./menuApi";
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export type AdminOrderStatus =
@@ -63,6 +65,8 @@ export type AdminDashboardData = {
   };
   demoPaymentsEnabled: boolean;
 };
+
+export type AdminRestaurantSettings = RestaurantOrderingStatus;
 
 export type AdminMenuProduct = {
   id: string;
@@ -174,6 +178,24 @@ export function fetchDashboard(signal?: AbortSignal) {
     }
 
     return data;
+  });
+}
+
+export function fetchAdminRestaurantSettings() {
+  return request<AdminRestaurantSettings>("/restaurant/settings");
+}
+
+export function updateAdminRestaurantOrdering(acceptingOrders: boolean) {
+  return request<AdminRestaurantSettings>("/restaurant/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ acceptingOrders }),
+  });
+}
+
+export function updateAdminOpeningHours(openingHours: OpeningHours) {
+  return request<AdminRestaurantSettings>("/restaurant/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ openingHours }),
   });
 }
 

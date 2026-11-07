@@ -13,7 +13,12 @@ import {
 } from "../adminPassword";
 import { db } from "../db";
 import { publishOrderStatus } from "../orderStatusEvents";
+import { publishRestaurantStatusChange } from "../catalogEvents";
 import { publishCatalogChange } from "../catalogEvents";
+import {
+  getRestaurantAvailability,
+  openingHoursSchema,
+} from "../restaurantSchedule";
 
 const router = Router();
 const SESSION_COOKIE = "fr_admin_session";
@@ -223,6 +228,113 @@ router.post("/auth/logout", requireAdmin, async (req, res) => {
 });
 
 router.use(requireAdmin);
+
+router.get("/restaurant/settings", async (_req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT accepting_orders AS "acceptingOrders",
+              opening_hours AS "openingHours",
+              updated_at AS "updatedAt"
+       FROM public.restaurant_settings
+       WHERE id = 1`,
+    );
+    if (!result.rows[0]) {
+      res.status(503).json({
+        code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+        message: "Restaurant ordering settings are unavailable.",
+      });
+      return;
+    }
+    const settings = result.rows[0];
+    const schedule = openingHoursSchema.safeParse(settings.openingHours);
+    if (!schedule.success) {
+      res.status(503).json({
+        code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+        message: "Restaurant opening hours are unavailable.",
+      });
+      return;
+    }
+    res.json({
+      ...settings,
+      openingHours: schedule.data,
+      ...getRestaurantAvailability(settings.acceptingOrders, schedule.data),
+    });
+  } catch (error) {
+    console.error("Admin restaurant settings lookup failed", {
+      code: (error as { code?: string }).code,
+    });
+    res.status(503).json({
+      code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+      message: "Restaurant ordering settings are unavailable.",
+    });
+  }
+});
+
+router.patch("/restaurant/settings", async (req, res) => {
+  const parsed = z.object({
+    acceptingOrders: z.boolean().optional(),
+    openingHours: openingHoursSchema.optional(),
+  }).strict().refine(
+    (settings) =>
+      settings.acceptingOrders !== undefined ||
+      settings.openingHours !== undefined,
+  ).safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      message: "Provide a valid ordering setting or weekly opening schedule.",
+    });
+    return;
+  }
+
+  try {
+    const result = await db.query(
+      `UPDATE public.restaurant_settings
+       SET accepting_orders = COALESCE($1, accepting_orders),
+           opening_hours = COALESCE($2::jsonb, opening_hours),
+           updated_at = clock_timestamp()
+       WHERE id = 1
+       RETURNING accepting_orders AS "acceptingOrders",
+                 opening_hours AS "openingHours",
+                 updated_at AS "updatedAt"`,
+      [
+        parsed.data.acceptingOrders ?? null,
+        parsed.data.openingHours
+          ? JSON.stringify(parsed.data.openingHours)
+          : null,
+      ],
+    );
+    if (!result.rows[0]) {
+      res.status(503).json({
+        code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+        message: "Restaurant ordering settings are unavailable.",
+      });
+      return;
+    }
+    publishRestaurantStatusChange();
+    const settings = result.rows[0];
+    const schedule = openingHoursSchema.safeParse(settings.openingHours);
+    if (!schedule.success) {
+      res.status(503).json({
+        code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+        message: "Restaurant opening hours are unavailable.",
+      });
+      return;
+    }
+    res.json({
+      ...settings,
+      openingHours: schedule.data,
+      ...getRestaurantAvailability(settings.acceptingOrders, schedule.data),
+    });
+  } catch (error) {
+    console.error("Admin restaurant settings update failed", {
+      code: (error as { code?: string }).code,
+    });
+    res.status(503).json({
+      code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+      message: "Unable to update restaurant ordering settings.",
+    });
+  }
+});
 
 router.get("/dashboard", async (_req, res) => {
   try {

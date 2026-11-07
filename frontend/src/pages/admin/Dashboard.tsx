@@ -1,13 +1,15 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Clock3, IndianRupee, PackageCheck, RefreshCw, XCircle } from "lucide-react";
+import { Activity, CheckCircle2, ChevronLeft, ChevronRight, ClipboardList, Clock3, IndianRupee, PackageCheck, Power, RefreshCw, XCircle } from "lucide-react";
 import {
   fetchAdminOrders,
   fetchDashboard,
+  updateAdminRestaurantOrdering,
   type AdminDashboardData,
   type AdminOrderRow,
 } from "../../services/adminApi";
 import { useVisiblePolling } from "../../hooks/useVisiblePolling";
+import { useMenu } from "../../context/MenuContext";
 
 const PAGE_SIZE = 25;
 const formatPrice = (amount: number) =>
@@ -36,12 +38,24 @@ function getIndiaDate() {
 }
 
 export default function Dashboard() {
+  const {
+    restaurantStatus,
+    restaurantStatusLoading,
+    restaurantStatusError,
+    refreshRestaurantStatus,
+    updateRestaurantStatus,
+  } = useMenu();
   const [data, setData] = useState<AdminDashboardData | null>(null);
   const [orders, setOrders] = useState<AdminOrderRow[]>([]);
   const [ordersTotal, setOrdersTotal] = useState(0);
   const [ordersOffset, setOrdersOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [updatingRestaurantStatus, setUpdatingRestaurantStatus] = useState(false);
+  const [restaurantStatusErrorMessage, setRestaurantStatusErrorMessage] =
+    useState<string | null>(null);
+  const [restaurantStatusNotice, setRestaurantStatusNotice] =
+    useState<string | null>(null);
 
   const refresh = useCallback(async (signal: AbortSignal) => {
     try {
@@ -75,6 +89,40 @@ export default function Dashboard() {
   const start = ordersTotal === 0 ? 0 : ordersOffset + 1;
   const end = Math.min(ordersOffset + orders.length, ordersTotal);
 
+  const toggleAcceptingOrders = async () => {
+    if (!restaurantStatus || restaurantStatusError || updatingRestaurantStatus) return;
+    const acceptingOrders = !restaurantStatus.acceptingOrders;
+    if (
+      !acceptingOrders &&
+      !window.confirm(
+        "Pause new orders? Customers will be unable to place orders until you resume accepting them.",
+      )
+    ) {
+      return;
+    }
+
+    setUpdatingRestaurantStatus(true);
+    setRestaurantStatusErrorMessage(null);
+    setRestaurantStatusNotice(null);
+    try {
+      const updated = await updateAdminRestaurantOrdering(acceptingOrders);
+      updateRestaurantStatus(updated);
+      setRestaurantStatusNotice(
+        updated.acceptingOrders
+          ? "Restaurant is now accepting orders."
+          : "New orders are paused.",
+      );
+    } catch (requestError) {
+      setRestaurantStatusErrorMessage(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to update restaurant ordering status.",
+      );
+    } finally {
+      setUpdatingRestaurantStatus(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
@@ -107,6 +155,101 @@ export default function Dashboard() {
           </button>
         </div>
       )}
+
+      <section
+        aria-labelledby="restaurant-operations-title"
+        className="flex flex-col gap-4 rounded-2xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between"
+      >
+        <div>
+          <h2
+            id="restaurant-operations-title"
+            className="font-serif text-xl font-semibold text-[#253b2a]"
+          >
+            Restaurant Operations
+          </h2>
+          <p className="mt-1 text-sm text-[#73796d]">Effective ordering status</p>
+          <p
+            className={`mt-1 inline-flex items-center gap-2 text-sm font-semibold ${
+              restaurantStatus?.orderingAvailable && !restaurantStatusError
+                ? "text-[#31573a]"
+                : "text-[#984734]"
+            }`}
+            role="status"
+          >
+            <span
+              className={`h-2.5 w-2.5 rounded-full ${
+                restaurantStatus?.orderingAvailable && !restaurantStatusError
+                  ? "bg-[#5d8a4c]"
+                  : "bg-[#b56b36]"
+              }`}
+              aria-hidden="true"
+            />
+            {restaurantStatusLoading
+              ? "Loading ordering status..."
+              : restaurantStatusError
+                ? "Ordering status unavailable"
+                : restaurantStatus?.status === "OPEN"
+                ? "Open for Orders"
+                : restaurantStatus?.status === "CLOSED"
+                  ? "Currently Closed"
+                  : restaurantStatus?.status === "PAUSED"
+                    ? "Temporarily Not Accepting Orders"
+                  : "Ordering status unavailable"}
+          </p>
+          {restaurantStatus && (
+            <p className="mt-1 text-sm text-[#73796d]">
+              Manual Accepting Orders: {restaurantStatus.acceptingOrders ? "ON" : "OFF"}
+            </p>
+          )}
+          {(restaurantStatusError || restaurantStatusErrorMessage) && (
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <p role="alert" className="text-sm text-red-700">
+                {restaurantStatusErrorMessage ?? restaurantStatusError}
+              </p>
+              {restaurantStatusError && (
+                <button
+                  type="button"
+                  onClick={() => void refreshRestaurantStatus()}
+                  className="text-sm font-semibold text-[#31573a] underline"
+                >
+                  Retry status
+                </button>
+              )}
+            </div>
+          )}
+          {restaurantStatusNotice && (
+            <p role="status" className="mt-2 text-sm text-[#31573a]">
+              {restaurantStatusNotice}
+            </p>
+          )}
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={restaurantStatus?.acceptingOrders === true}
+          aria-label="Accepting Orders"
+          disabled={
+            restaurantStatusLoading ||
+            restaurantStatus === null ||
+            restaurantStatusError !== null ||
+            updatingRestaurantStatus
+          }
+          onClick={() => void toggleAcceptingOrders()}
+          className={`inline-flex min-h-12 items-center justify-center gap-2 self-start rounded-xl px-5 font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto ${
+            restaurantStatus?.acceptingOrders && !restaurantStatusError
+              ? "bg-[#31573a] hover:bg-[#25472e]"
+              : "bg-[#984734] hover:bg-[#7f382b]"
+          }`}
+        >
+          <Power size={17} aria-hidden="true" />
+          {updatingRestaurantStatus
+            ? "Saving..."
+            : restaurantStatus?.acceptingOrders
+              && !restaurantStatusError
+              ? "Accepting Orders ON"
+              : "Accepting Orders OFF"}
+        </button>
+      </section>
 
       <section
         aria-label="Order statistics"

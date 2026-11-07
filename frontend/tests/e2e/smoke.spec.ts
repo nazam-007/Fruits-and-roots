@@ -2,9 +2,33 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 const apiBaseURL = process.env.API_BASE_URL || "http://localhost:5000";
 const menuEndpoint = `${apiBaseURL}/api/menu`;
+const allDaySchedule = {
+  monday: { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
+  tuesday: { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
+  wednesday: { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
+  thursday: { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
+  friday: { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
+  saturday: { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
+  sunday: { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
+};
+
+function restaurantStatus(acceptingOrders: boolean, openingHours = allDaySchedule) {
+  const status = acceptingOrders ? "OPEN" : "PAUSED";
+  return {
+    acceptingOrders,
+    openingHours,
+    updatedAt: "2026-11-07T09:00:00.000Z",
+    orderingAvailable: status === "OPEN",
+    status,
+    isScheduledOpen: true,
+    nextOpenAt: null,
+    timeZone: "Asia/Kolkata",
+  };
+}
 
 type MenuProduct = {
   id: string;
+  categoryId?: string;
   name: string;
   category: string;
   available: boolean;
@@ -35,6 +59,16 @@ async function seedCart(page: Page, product: MenuProduct) {
     },
     { id: product.id, name: product.name, size: variant.size, price: variant.price },
   );
+}
+
+async function mockAcceptingOrders(page: Page) {
+  await page.route(`${apiBaseURL}/api/menu/status`, async (route) => {
+    await route.fulfill({
+      json: {
+        ...restaurantStatus(true),
+      },
+    });
+  });
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
@@ -168,6 +202,222 @@ test("customer menu refreshes immediately after a catalog event", async ({ page 
   productAvailable = false;
   releaseCatalogEvent();
   await expect(productLink).toHaveCount(0, { timeout: 2_000 });
+});
+
+test("restaurant ordering status disables checkout without clearing the cart", async ({
+  page,
+}) => {
+  const product: MenuProduct = {
+    id: "ordering-state-item",
+    categoryId: "00000000-0000-4000-8000-000000000001",
+    name: "Order State Juice",
+    category: "Juices",
+    available: true,
+    availabilityStatus: "AVAILABLE",
+    variants: [{ size: "Regular", price: 130 }],
+  };
+  let acceptingOrders = true;
+  let releaseStatusEvent!: () => void;
+  const statusEventReady = new Promise<void>((resolve) => {
+    releaseStatusEvent = resolve;
+  });
+  await page.route(menuEndpoint, async (route) => {
+    await route.fulfill({ json: [product] });
+  });
+  await page.route(`${apiBaseURL}/api/menu/status`, async (route) => {
+    await route.fulfill({
+      json: {
+        ...restaurantStatus(acceptingOrders),
+      },
+    });
+  });
+  await page.route("**/api/menu/events", async (route) => {
+    await statusEventReady;
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+      body: "retry: 10000\n\nevent: restaurant-status-changed\ndata: {}\n\n",
+    });
+  });
+  await seedCart(page, product);
+
+  await page.goto("/menu");
+  await expect(page.getByText("Open Now")).toBeVisible();
+  await page.goto("/checkout");
+  await expect(
+    page.getByRole("button", { name: /Continue to Payment/ }).first(),
+  ).toBeEnabled();
+
+  acceptingOrders = false;
+  releaseStatusEvent();
+  await expect(
+    page.getByText("The restaurant is temporarily not accepting orders. Your cart is saved."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Continue to Payment/ }).first(),
+  ).toBeDisabled();
+  await expect.poll(() =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("fruits-and-roots-cart") ?? "[]")),
+  ).toMatchObject([{ id: product.id, quantity: 1 }]);
+
+  await page.goto("/menu");
+  await expect(page.getByText("Temporarily Not Accepting Orders")).toBeVisible();
+});
+
+test("admin can pause and resume ordering without optimistic state on failure", async ({
+  page,
+}) => {
+  let acceptingOrders = true;
+  let openingHours = allDaySchedule;
+  let failNextUpdate = true;
+  await page.route(`${apiBaseURL}/api/menu/status`, async (route) => {
+    await route.fulfill({
+      json: {
+        ...restaurantStatus(acceptingOrders, openingHours),
+      },
+    });
+  });
+  await page.route("**/api/menu/events", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+      body: "",
+    });
+  });
+  await page.route("**/api/admin/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/admin/auth/session") {
+      await route.fulfill({ json: { adminId: "test-admin" } });
+      return;
+    }
+    if (url.pathname === "/api/admin/dashboard") {
+      await route.fulfill({
+        json: {
+          summary: {
+            total_orders: 0,
+            total_orders_today: 0,
+            new_orders: 0,
+            preparing_orders: 0,
+            ready_orders: 0,
+            completed_orders: 0,
+            cancelled_orders: 0,
+            verified_revenue_today: 0,
+            demo_revenue_today: 0,
+          },
+          demoPaymentsEnabled: false,
+        },
+      });
+      return;
+    }
+    if (url.pathname === "/api/admin/orders") {
+      await route.fulfill({
+        json: {
+          items: [],
+          orders: [],
+          page: 1,
+          total: 0,
+          totalPages: 0,
+          counts: {
+            ALL: 0,
+            PLACED: 0,
+            PREPARING: 0,
+            READY: 0,
+            COMPLETED: 0,
+            CANCELLED: 0,
+          },
+          limit: 25,
+          offset: 0,
+        },
+      });
+      return;
+    }
+    if (url.pathname === "/api/admin/restaurant/settings") {
+      if (request.method() === "GET") {
+        await route.fulfill({
+          json: {
+            ...restaurantStatus(acceptingOrders, openingHours),
+          },
+        });
+        return;
+      }
+      if (failNextUpdate) {
+        failNextUpdate = false;
+        await route.fulfill({
+          status: 503,
+          json: { message: "Unable to update restaurant ordering settings." },
+        });
+        return;
+      }
+      const body = request.postDataJSON();
+      if (typeof body.acceptingOrders === "boolean") {
+        acceptingOrders = body.acceptingOrders;
+      }
+      if (body.openingHours) openingHours = body.openingHours;
+      await route.fulfill({
+        json: restaurantStatus(acceptingOrders, openingHours),
+      });
+      return;
+    }
+    await route.fulfill({ status: 404, json: { message: "Not mocked." } });
+  });
+
+  await page.goto("/admin");
+  const toggle = page.getByRole("switch", { name: "Accepting Orders" });
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+  await page.once("dialog", (dialog) => dialog.accept());
+  await toggle.click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Unable to update restaurant ordering settings.",
+  );
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+
+  await page.once("dialog", (dialog) => dialog.accept());
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByText("New orders are paused.")).toBeVisible();
+
+  await page.goto("/admin/settings");
+  await expect(page.getByRole("heading", { name: "Opening Hours" })).toBeVisible();
+  const monday = page.locator("fieldset").filter({ hasText: "Monday" });
+  await monday.getByRole("checkbox").first().uncheck();
+  const tuesday = page.locator("fieldset").filter({ hasText: "Tuesday" });
+  await tuesday.getByRole("checkbox").nth(1).uncheck();
+  await expect(tuesday.getByLabel("Opens")).toHaveValue("09:00");
+  await expect(tuesday.getByLabel("Closes")).toHaveValue("17:00");
+  await page.getByRole("button", { name: "Save hours" }).click();
+  await expect(page.getByText("Opening hours saved.")).toBeVisible();
+  await expectNoHorizontalOverflow(page);
+  expect(acceptingOrders).toBe(false);
+});
+
+test("customer menu shows closed status and the next scheduled opening", async ({ page }) => {
+  const schedule = {
+    ...allDaySchedule,
+    monday: { ...allDaySchedule.monday, isOpen: false },
+  };
+  await page.route(`${apiBaseURL}/api/menu/status`, async (route) => {
+    await route.fulfill({
+      json: {
+        ...restaurantStatus(true, schedule),
+        status: "CLOSED",
+        orderingAvailable: false,
+        isScheduledOpen: false,
+        nextOpenAt: "2026-11-10T04:30:00.000Z",
+      },
+    });
+  });
+  await page.route("**/api/menu/events", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+      body: "",
+    });
+  });
+  await page.goto("/menu");
+  await expect(page.getByText("Closed Now")).toBeVisible();
+  await expect(page.getByText(/Opens next:/)).toContainText("IST");
 });
 
 test("admin category creation is database-backed and assignable to a product", async ({
@@ -503,6 +753,7 @@ test("checkout form supports optional phone without submitting an order", async 
   const product = products.find((item) => item.available && item.variants.length);
   expect(product, "menu should contain an available product").toBeTruthy();
   await seedCart(page, product!);
+  await mockAcceptingOrders(page);
   await page.goto("/checkout");
 
   await expect(page.getByRole("heading", { name: "Checkout" })).toBeVisible();
@@ -521,6 +772,7 @@ test("checkout submits Takeaway by default and optional Dine-in table number", a
   const product = products.find((item) => item.available && item.variants.length);
   expect(product, "menu should contain an available product").toBeTruthy();
   await seedCart(page, product!);
+  await mockAcceptingOrders(page);
 
   const submittedOrders: Array<Record<string, unknown>> = [];
   await page.route("**/api/orders", async (route) => {

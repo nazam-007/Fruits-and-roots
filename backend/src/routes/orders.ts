@@ -4,6 +4,10 @@ import QRCode from "qrcode";
 import { z } from "zod";
 import { db } from "../db";
 import {
+  getRestaurantAvailability,
+  openingHoursSchema,
+} from "../restaurantSchedule";
+import {
   publishOrderStatus,
   subscribeToOrderStatus,
 } from "../orderStatusEvents";
@@ -531,6 +535,54 @@ router.post("/orders", limitOrders, async (req, res) => {
         return;
       }
       res.status(200).json(toOrderResponse(existingOrder, trackingToken));
+      return;
+    }
+
+    // FOR SHARE makes a pause wait for an in-flight order transaction to finish.
+    const orderingSettings = await client.query(
+      `SELECT accepting_orders, opening_hours
+       FROM public.restaurant_settings
+       WHERE id = 1
+       FOR SHARE`,
+    );
+    if (!orderingSettings.rows[0]) {
+      await client.query("ROLLBACK");
+      res.status(503).json({
+        code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+        message: "Unable to verify whether the restaurant is accepting orders.",
+      });
+      return;
+    }
+    const schedule = openingHoursSchema.safeParse(
+      orderingSettings.rows[0].opening_hours,
+    );
+    if (!schedule.success) {
+      await client.query("ROLLBACK");
+      res.status(503).json({
+        code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+        message: "Unable to verify the restaurant's opening hours.",
+      });
+      return;
+    }
+    const availability = getRestaurantAvailability(
+      orderingSettings.rows[0].accepting_orders === true,
+      schedule.data,
+    );
+    if (availability.status === "PAUSED") {
+      await client.query("ROLLBACK");
+      res.status(409).json({
+        code: "ORDERS_PAUSED",
+        message: "The restaurant is temporarily not accepting orders. Your cart is saved; please try again later.",
+      });
+      return;
+    }
+    if (!availability.orderingAvailable) {
+      await client.query("ROLLBACK");
+      res.status(409).json({
+        code: "RESTAURANT_CLOSED",
+        message: "The restaurant is currently closed. Your cart is saved; please order during opening hours.",
+        nextOpenAt: availability.nextOpenAt,
+      });
       return;
     }
 
