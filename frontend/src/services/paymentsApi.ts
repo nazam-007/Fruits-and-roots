@@ -49,3 +49,21 @@ export async function simulateDemoPayment(
     ),
   );
 }
+
+export async function cancelPendingPayment(
+  orderId: string,
+  trackingToken: string,
+) {
+  return readResponse<{
+    orderId: string;
+    paymentStatus: "CANCELLED" | "EXPIRED";
+  }>(
+    await fetch(
+      `${API_URL}/api/orders/${encodeURIComponent(orderId)}/payment-cancel`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${trackingToken}` },
+      },
+    ),
+  );
+}

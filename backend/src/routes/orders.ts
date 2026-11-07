@@ -11,6 +11,7 @@ import {
   publishOrderStatus,
   subscribeToOrderStatus,
 } from "../orderStatusEvents";
+import { getPendingPaymentExpiryMinutes } from "../paymentExpiry";
 
 const router = Router();
 
@@ -259,6 +260,7 @@ function toOrderResponse(row: {
   table_number: string | null;
   total_amount: number;
   payment_status: string;
+  payment_expires_at?: Date;
   payment_source: string | null;
   order_status: string;
   created_at: Date;
@@ -279,6 +281,9 @@ function toOrderResponse(row: {
     tableNumber: row.table_number,
     totalAmount: Number(row.total_amount),
     paymentStatus: row.payment_status,
+    ...(row.payment_expires_at
+      ? { paymentExpiresAt: row.payment_expires_at }
+      : {}),
     paymentSource: row.payment_source,
     orderStatus: row.order_status,
     createdAt: row.created_at,
@@ -293,6 +298,7 @@ async function loadOrder(orderId: string) {
             o.order_type, COALESCE(o.table_number, rt.table_number) AS table_number,
             o.total_amount,
             o.payment_status,
+            o.payment_expires_at,
             (SELECT p.payment_source FROM payments p WHERE p.order_id = o.id LIMIT 1) AS payment_source,
             o.order_status, o.created_at,
             COALESCE(
@@ -323,6 +329,7 @@ async function loadOrderInTransaction(client: import("pg").PoolClient, key: stri
             o.order_type, COALESCE(o.table_number, rt.table_number) AS table_number,
             o.total_amount,
             o.payment_status,
+            o.payment_expires_at,
             (SELECT p.payment_source FROM payments p WHERE p.order_id = o.id LIMIT 1) AS payment_source,
             o.order_status, o.created_at,
             COALESCE(
@@ -509,7 +516,8 @@ router.post("/orders", limitOrders, async (req, res) => {
     await client.query("BEGIN");
 
     const priorResult = await client.query(
-      `SELECT request_hash, tracking_token_hash
+      `SELECT request_hash, tracking_token_hash, payment_status,
+              (payment_expires_at > NOW()) AS payment_attempt_active
        FROM orders WHERE idempotency_key = $1`,
       [input.idempotencyKey],
     );
@@ -522,6 +530,18 @@ router.post("/orders", limitOrders, async (req, res) => {
         await client.query("ROLLBACK");
         res.status(409).json({
           message: "This checkout key was already used for a different order.",
+        });
+        return;
+      }
+      if (
+        ["CANCELLED", "EXPIRED", "REJECTED"].includes(prior.payment_status) ||
+        (["PENDING_PAYMENT", "PENDING_VERIFICATION"].includes(prior.payment_status) &&
+          prior.payment_attempt_active !== true)
+      ) {
+        await client.query("COMMIT");
+        res.status(409).json({
+          code: "PAYMENT_ATTEMPT_ENDED",
+          message: "This checkout attempt ended. Start a new checkout from your cart.",
         });
         return;
       }
@@ -652,8 +672,11 @@ router.post("/orders", limitOrders, async (req, res) => {
          (customer_name, customer_phone, table_id, fulfillment_type,
           order_type, table_number, total_amount,
           payment_status, order_status, idempotency_key, request_hash,
-          tracking_token_hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING_PAYMENT', 'PLACED', $8, $9, $10)
+           tracking_token_hash, payment_expires_at)
+       VALUES (
+          $1, $2, $3, $4, $5, $6, $7, 'PENDING_PAYMENT', 'PENDING_PAYMENT',
+          $8, $9, $10, NOW() + ($11::int * INTERVAL '1 minute')
+       )
        ON CONFLICT (idempotency_key) DO NOTHING
        RETURNING id`,
       [
@@ -667,12 +690,14 @@ router.post("/orders", limitOrders, async (req, res) => {
         input.idempotencyKey,
         requestHash,
         trackingTokenHash,
+        getPendingPaymentExpiryMinutes(),
       ],
     );
 
     if (!inserted.rows[0]) {
       const existingResult = await client.query(
-        `SELECT request_hash, tracking_token_hash
+        `SELECT request_hash, tracking_token_hash, payment_status,
+                (payment_expires_at > NOW()) AS payment_attempt_active
          FROM orders WHERE idempotency_key = $1`,
         [input.idempotencyKey],
       );
@@ -685,6 +710,18 @@ router.post("/orders", limitOrders, async (req, res) => {
         await client.query("ROLLBACK");
         res.status(409).json({
           message: "This checkout key was already used for a different order.",
+        });
+        return;
+      }
+      if (
+        ["CANCELLED", "EXPIRED", "REJECTED"].includes(existing.payment_status) ||
+        (["PENDING_PAYMENT", "PENDING_VERIFICATION"].includes(existing.payment_status) &&
+          existing.payment_attempt_active !== true)
+      ) {
+        await client.query("COMMIT");
+        res.status(409).json({
+          code: "PAYMENT_ATTEMPT_ENDED",
+          message: "This checkout attempt ended. Start a new checkout from your cart.",
         });
         return;
       }
@@ -761,7 +798,9 @@ router.post(
       client = await db.connect();
       await client.query("BEGIN");
       const orderResult = await client.query(
-        `SELECT id, payment_status, order_status, tracking_token_hash
+        `SELECT id, payment_status, order_status, payment_expires_at,
+                (payment_expires_at > NOW()) AS payment_attempt_active,
+                tracking_token_hash
          FROM orders WHERE id = $1 FOR UPDATE`,
         [orderIdResult.data],
       );
@@ -790,6 +829,28 @@ router.post(
           paymentStatus: "PAID",
           paymentSource: "DEMO",
           orderStatus: order.order_status,
+        });
+        return;
+      }
+
+      if (
+        ["PENDING_PAYMENT", "PENDING_VERIFICATION"].includes(order.payment_status) &&
+        order.payment_attempt_active !== true
+      ) {
+        await client.query(
+          `UPDATE orders SET payment_status = 'EXPIRED'
+           WHERE id = $1 AND payment_status IN ('PENDING_PAYMENT', 'PENDING_VERIFICATION')`,
+          [order.id],
+        );
+        await client.query(
+          `UPDATE payments SET payment_status = 'EXPIRED'
+           WHERE order_id = $1
+             AND payment_status IN ('PENDING_PAYMENT', 'PENDING_VERIFICATION')`,
+          [order.id],
+        );
+        await client.query("COMMIT");
+        res.status(409).json({
+          message: "This payment attempt has expired. Start a new checkout from your cart.",
         });
         return;
       }
@@ -827,16 +888,19 @@ router.post(
 
       await client.query(
         `UPDATE orders
-         SET payment_status = 'PAID', paid_at = COALESCE(paid_at, NOW())
+         SET payment_status = 'PAID',
+             order_status = 'PLACED',
+             paid_at = COALESCE(paid_at, NOW())
          WHERE id = $1`,
         [order.id],
       );
       await client.query("COMMIT");
+      publishOrderStatus(order.id, "PLACED");
       res.status(200).json({
         orderId: order.id,
         paymentStatus: "PAID",
         paymentSource: "DEMO",
-        orderStatus: order.order_status,
+        orderStatus: "PLACED",
       });
     } catch {
       if (client) {
@@ -869,7 +933,9 @@ router.post("/orders/:orderId/payment-claim", limitOrders, async (req, res) => {
   try {
     await client.query("BEGIN");
     const result = await client.query(
-      `SELECT o.payment_status, o.order_status, o.tracking_token_hash,
+      `SELECT o.payment_status, o.order_status, o.payment_expires_at,
+              (o.payment_expires_at > NOW()) AS payment_attempt_active,
+              o.tracking_token_hash,
               p.payment_status AS recorded_payment_status,
               p.transaction_reference, p.payment_source
        FROM orders o
@@ -882,6 +948,25 @@ router.post("/orders/:orderId/payment-claim", limitOrders, async (req, res) => {
     if (!order || !hashesMatch(order.tracking_token_hash, hash(token))) {
       await client.query("ROLLBACK");
       res.status(404).json({ message: "Order not found." });
+      return;
+    }
+    if (
+      ["PENDING_PAYMENT", "PENDING_VERIFICATION"].includes(order.payment_status) &&
+      order.payment_attempt_active !== true
+    ) {
+      await client.query(
+        `UPDATE orders SET payment_status = 'EXPIRED'
+         WHERE id = $1 AND payment_status IN ('PENDING_PAYMENT', 'PENDING_VERIFICATION')`,
+        [orderId.data],
+      );
+      await client.query(
+        `UPDATE payments SET payment_status = 'EXPIRED'
+         WHERE order_id = $1
+           AND payment_status IN ('PENDING_PAYMENT', 'PENDING_VERIFICATION')`,
+        [orderId.data],
+      );
+      await client.query("COMMIT");
+      res.status(410).json({ message: "This payment attempt has expired." });
       return;
     }
     if (order.order_status === "CANCELLED") {
@@ -944,6 +1029,92 @@ router.post("/orders/:orderId/payment-claim", limitOrders, async (req, res) => {
     client.release();
   }
 });
+
+router.post(
+  "/orders/:orderId/payment-cancel",
+  limitOrderCancellation,
+  async (req, res) => {
+    const orderId = z.string().uuid().safeParse(req.params.orderId);
+    const token = getBearerToken(req);
+    if (!orderId.success || !token) {
+      res.status(404).json({ message: "Order not found." });
+      return;
+    }
+
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query(
+        `SELECT o.payment_status, o.payment_expires_at,
+                (o.payment_expires_at > NOW()) AS payment_attempt_active,
+                o.tracking_token_hash,
+                p.payment_status AS recorded_payment_status
+         FROM orders o
+         JOIN payments p ON p.order_id = o.id
+         WHERE o.id = $1
+         FOR UPDATE OF o, p`,
+        [orderId.data],
+      );
+      const attempt = result.rows[0];
+      if (!attempt || !hashesMatch(attempt.tracking_token_hash, hash(token))) {
+        await client.query("ROLLBACK");
+        res.status(404).json({ message: "Order not found." });
+        return;
+      }
+
+      if (["CANCELLED", "EXPIRED"].includes(attempt.payment_status)) {
+        await client.query("COMMIT");
+        res.json({
+          orderId: orderId.data,
+          paymentStatus: attempt.payment_status,
+        });
+        return;
+      }
+
+      if (
+        !["PENDING_PAYMENT", "PENDING_VERIFICATION"].includes(
+          attempt.payment_status,
+        ) ||
+        !["PENDING_PAYMENT", "PENDING_VERIFICATION"].includes(
+          attempt.recorded_payment_status,
+        )
+      ) {
+        await client.query("ROLLBACK");
+        res.status(409).json({
+          message: "Only an unconfirmed payment attempt can be cancelled.",
+        });
+        return;
+      }
+
+      const paymentStatus =
+        attempt.payment_attempt_active !== true
+          ? "EXPIRED"
+          : "CANCELLED";
+      await client.query(
+        `UPDATE orders SET payment_status = $2 WHERE id = $1`,
+        [orderId.data, paymentStatus],
+      );
+      await client.query(
+        `UPDATE payments SET payment_status = $2 WHERE order_id = $1`,
+        [orderId.data, paymentStatus],
+      );
+      await client.query("COMMIT");
+      res.json({ orderId: orderId.data, paymentStatus });
+    } catch (error) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        // The transaction may already have been rolled back.
+      }
+      console.error("Pending payment cancellation failed", {
+        code: (error as { code?: string }).code,
+      });
+      res.status(500).json({ message: "Unable to cancel this payment attempt." });
+    } finally {
+      client.release();
+    }
+  },
+);
 
 router.post(
   "/orders/:orderId/cancel",

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import {
+  fetchAdminPaymentQueue,
   fetchAdminOrders,
   type AdminOrderRow,
   type AdminOrderStatus,
@@ -16,11 +17,20 @@ const filters = [
   ["READY", "Ready"],
   ["COMPLETED", "Completed"],
   ["CANCELLED", "Cancelled"],
+  ["PAYMENT_VERIFICATION", "Payment verification"],
+  ["RECONCILIATION", "Reconciliation"],
 ] as const;
 const orderStatuses = ["ALL", "PLACED", "PREPARING", "READY", "COMPLETED", "CANCELLED"] as const;
+type OrdersView =
+  | (typeof orderStatuses)[number]
+  | "PAYMENT_VERIFICATION"
+  | "RECONCILIATION";
 
-function isOrderStatus(value: string | null): value is (typeof orderStatuses)[number] {
-  return value !== null && orderStatuses.includes(value as (typeof orderStatuses)[number]);
+function isOrdersView(value: string | null): value is OrdersView {
+  return value !== null &&
+    [...orderStatuses, "PAYMENT_VERIFICATION", "RECONCILIATION"].includes(
+      value as OrdersView,
+    );
 }
 
 const formatPrice = (amount: number) =>
@@ -44,7 +54,7 @@ function formatFulfillment(order: AdminOrderRow) {
 export default function Orders() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlStatus = searchParams.get("status");
-  const status: "ALL" | AdminOrderStatus = isOrderStatus(urlStatus)
+  const status: OrdersView = isOrdersView(urlStatus)
     ? urlStatus
     : "PLACED";
   const pageParam = searchParams.get("page");
@@ -69,18 +79,26 @@ export default function Orders() {
   const refresh = useCallback(async (signal: AbortSignal) => {
     try {
       const offset = (pageNumber - 1) * PAGE_SIZE;
-      const result = await fetchAdminOrders(
-        status,
-        PAGE_SIZE,
-        offset,
-        signal,
-        pageNumber,
-        dateFilter,
-      );
+      const result = status === "PAYMENT_VERIFICATION" ||
+          status === "RECONCILIATION"
+        ? await fetchAdminPaymentQueue(
+            status === "PAYMENT_VERIFICATION" ? "verification" : "reconciliation",
+            PAGE_SIZE,
+            offset,
+            signal,
+          )
+        : await fetchAdminOrders(
+            status,
+            PAGE_SIZE,
+            offset,
+            signal,
+            pageNumber,
+            dateFilter,
+          );
       if (signal.aborted) return;
       setItems(result.items);
       setTotal(result.total);
-      setCounts(result.counts);
+      if ("counts" in result) setCounts(result.counts);
       setError(null);
       if (pageNumber > result.totalPages) {
         const nextParams = new URLSearchParams(searchParams);
@@ -105,7 +123,7 @@ export default function Orders() {
     `${status}:${pageNumber}:${dateFilter ?? ""}`,
   );
 
-  const setFilter = (nextStatus: "ALL" | AdminOrderStatus) => {
+  const setFilter = (nextStatus: OrdersView) => {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set("status", nextStatus);
     nextParams.set("page", "1");
@@ -124,9 +142,9 @@ export default function Orders() {
     const validPageParam =
       pageParam === null ||
       (Number.isInteger(Number(pageParam)) && Number(pageParam) > 0);
-    if (!isOrderStatus(urlStatus) || !validPageParam) {
+    if (!isOrdersView(urlStatus) || !validPageParam) {
       const nextParams = new URLSearchParams(searchParams);
-      if (!isOrderStatus(urlStatus)) nextParams.set("status", "PLACED");
+      if (!isOrdersView(urlStatus)) nextParams.set("status", "PLACED");
       if (!validPageParam) nextParams.set("page", "1");
       if (dateParam !== null && !isValidDateFilter(dateParam)) {
         nextParams.delete("date");
@@ -177,10 +195,23 @@ export default function Orders() {
                 : "border border-[#dfe3d8] bg-white text-[#596554] hover:bg-[#f2f4ed]"
             }`}
           >
-            {label} <span className="ml-1 text-xs opacity-75">{counts[filter]}</span>
+            {label}
+            {orderStatuses.includes(filter as (typeof orderStatuses)[number]) && (
+              <span className="ml-1 text-xs opacity-75">
+                {counts[filter as (typeof orderStatuses)[number]]}
+              </span>
+            )}
           </button>
         ))}
       </div>
+
+      {(status === "PAYMENT_VERIFICATION" || status === "RECONCILIATION") && (
+        <p className="rounded-xl border border-[#eed8b6] bg-[#fff8ed] px-4 py-3 text-sm leading-6 text-[#73542f]">
+          {status === "PAYMENT_VERIFICATION"
+            ? "Restricted queue for manual UPI claims. Only verified payments become operational orders."
+            : "Review confirmed receipts for expired or cancelled attempts. Verifying here flags reconciliation only and never places the order."}
+        </p>
+      )}
 
       {error && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
@@ -205,6 +236,10 @@ export default function Orders() {
                 ? "Orders could not be loaded. Retry to check again."
                 : status === "PLACED"
                   ? "No new orders right now."
+                  : status === "PAYMENT_VERIFICATION"
+                    ? "There are no active payment claims to verify."
+                    : status === "RECONCILIATION"
+                      ? "There are no cancelled or expired payment attempts to reconcile."
                   : "There are no orders in this status."}
             </p>
           </div>
@@ -217,7 +252,11 @@ export default function Orders() {
                   <th className="px-4 py-3">Customer</th>
                   <th className="px-4 py-3">Phone</th>
                   <th className="px-4 py-3">Amount</th>
-                  <th className="px-4 py-3">Payment</th>
+                  <th className="px-4 py-3">
+                    {status === "PAYMENT_VERIFICATION" || status === "RECONCILIATION"
+                      ? "Reported reference"
+                      : "Payment"}
+                  </th>
                   <th className="px-4 py-3">Order status</th>
                   <th className="px-4 py-3">Fulfillment</th>
                   <th className="px-4 py-3">Created</th>
@@ -242,7 +281,17 @@ export default function Orders() {
                     <td className="px-4 py-3 font-medium text-[#394b38]">{order.customer_name}</td>
                     <td className="px-4 py-3 text-[#73796d]">{order.customer_phone || "—"}</td>
                     <td className="px-4 py-3 tabular-nums">{formatPrice(order.total_amount)}</td>
-                    <td className="px-4 py-3">{order.payment_status.replaceAll("_", " ")}</td>
+                    <td className="px-4 py-3">
+                      {status === "PAYMENT_VERIFICATION" || status === "RECONCILIATION"
+                        ? order.transaction_reference || "Not reported"
+                        : order.payment_status.replaceAll("_", " ")}
+                      {status === "RECONCILIATION" &&
+                        order.reconciliation_required && (
+                          <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                            FLAGGED
+                          </span>
+                        )}
+                    </td>
                     <td className="px-4 py-3">{order.order_status}</td>
                     <td className="px-4 py-3">{formatFulfillment(order)}</td>
                     <td className="px-4 py-3 text-[#73796d]">

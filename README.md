@@ -47,6 +47,7 @@ Edit `backend\.env` and configure the required values:
 | `MERCHANT_UPI_ID` | Merchant UPI ID used to display payment instructions. |
 | `MERCHANT_UPI_NAME` | Merchant display name for payment instructions. |
 | `ORDER_TRACKING_SECRET` | Long, random secret used to protect order-tracking access. |
+| `PENDING_PAYMENT_EXPIRY_MINUTES` | Server-side pending payment expiration period in minutes; defaults to `30` (allowed range: 1–1440). |
 | `ADMIN_USERNAME` | Admin login username. |
 | `ADMIN_PASSWORD_HASH` | Scrypt password hash; generate it as described below. Passwords may be 6–128 characters; use a long unique passphrase. |
 | `SUPABASE_URL` | Supabase project URL for optional image uploads. |
@@ -84,8 +85,16 @@ The SQL migrations are in `backend/migrations/` and must be applied to the targe
 4. `004_order_creation_schema_repair.sql`
 5. `005_admin_dashboard.sql`
 6. `006_menu_management.sql`
+7. `007_order_fulfillment_choice.sql`
+8. `008_dynamic_categories.sql`
+9. `009_category_sort_order.sql`
+10. `010_restaurant_ordering_settings.sql`
+11. `011_restaurant_weekly_opening_hours.sql`
+12. `012_payment_attempt_lifecycle.sql`
 
 Apply migrations only if they have not already been applied to that database. Use a database migration workflow or the Supabase SQL Editor, and verify the result before deploying the application. Do not run migrations against production without a backup and review.
+
+The backend runs a server-side expiry worker at startup and once per minute. Keep at least one backend process running for timely expiry; payment and admin mutation endpoints also enforce the recorded expiry time. Expired and cancelled payment attempts are retained for audit and reconciliation.
 
 ### Optional product image uploads
 
@@ -130,6 +139,12 @@ Only public configuration belongs in `VITE_*` variables. Never store database cr
 | `/payment/:orderId` | Continue payment for the existing order |
 | `/order/:orderId` | Track an order |
 
+Checkout creates a `PENDING_PAYMENT` attempt, not an operational order. Customers can cancel it from the payment page; otherwise the backend expires it after `PENDING_PAYMENT_EXPIRY_MINUTES` (30 by default). Only server-confirmed demo payments in development or admin-verified manual UPI payments become `PLACED`. Admin Orders and dashboard counts include paid orders only. Manual claims are handled in a separate admin verification queue; late receipts for cancelled/expired attempts are flagged for reconciliation and are not fulfilled.
+
+- `POST /api/orders/:orderId/payment-cancel` cancels a pending customer attempt and requires its order tracking token.
+- `GET /api/admin/payment-claims` returns the protected queue of active manual claims.
+- `GET /api/admin/payment-reconciliation` returns cancelled/expired manual attempts for authorized review.
+
 ## Admin routes
 
 | Route | Purpose |
@@ -139,6 +154,8 @@ Only public configuration belongs in `VITE_*` variables. Never store database cr
 | `/admin/orders` | Order list |
 | `/admin/orders/:orderId` | Order details and available staff actions |
 | `/admin/menu` | Product and menu management |
+
+The Admin Orders page also has separate **Payment verification** and **Reconciliation** queues. The verification queue is for pending manual claims. The reconciliation queue is for cancelled/expired manual payment attempts; confirming a late receipt records it for authorized reconciliation without placing the order.
 
 Sign in at `/admin/login` using the configured admin username and password. Admin access requires the backend session and database migrations to be configured.
 

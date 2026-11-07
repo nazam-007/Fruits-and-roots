@@ -342,28 +342,45 @@ router.get("/dashboard", async (_req, res) => {
       `WITH local_day AS (
          SELECT ((NOW() AT TIME ZONE 'Asia/Kolkata')::date::timestamp
                  AT TIME ZONE 'Asia/Kolkata') AS start_at
+       ), operational_orders AS (
+         SELECT o.id, o.order_status, o.created_at, o.total_amount
+         FROM orders o
+         WHERE o.payment_status = 'PAID'
        )
        SELECT
-         (SELECT COUNT(*)::int FROM orders) AS total_orders,
+         COUNT(*)::int AS total_orders,
          COUNT(*) FILTER (WHERE o.created_at >= local_day.start_at)::int AS total_orders_today,
          COUNT(*) FILTER (WHERE o.order_status = 'PLACED' AND o.created_at >= local_day.start_at)::int AS new_orders,
          COUNT(*) FILTER (WHERE o.order_status = 'PREPARING' AND o.created_at >= local_day.start_at)::int AS preparing_orders,
          COUNT(*) FILTER (WHERE o.order_status = 'READY' AND o.created_at >= local_day.start_at)::int AS ready_orders,
          COUNT(*) FILTER (WHERE o.order_status = 'COMPLETED' AND o.created_at >= local_day.start_at)::int AS completed_orders,
-         COALESCE(SUM(o.total_amount) FILTER (
-           WHERE o.payment_status = 'PAID'
-             AND p.payment_source = 'MANUAL_UPI'
-             AND p.verified_at IS NOT NULL
-             AND o.created_at >= local_day.start_at
+         COUNT(*) FILTER (WHERE o.order_status = 'CANCELLED')::int AS cancelled_orders,
+         COALESCE((
+           SELECT SUM(o.total_amount)
+           FROM operational_orders o
+           WHERE o.created_at >= local_day.start_at
+             AND EXISTS (
+               SELECT 1 FROM payments p
+               WHERE p.order_id = o.id
+                 AND p.payment_status = 'PAID'
+                 AND p.payment_source = 'MANUAL_UPI'
+                 AND p.verified_at IS NOT NULL
+             )
          ), 0)::bigint AS verified_revenue_today,
-         COALESCE(SUM(o.total_amount) FILTER (
-           WHERE o.payment_status = 'PAID'
-             AND p.payment_source = 'DEMO'
-             AND o.created_at >= local_day.start_at
+         COALESCE((
+           SELECT SUM(o.total_amount)
+           FROM operational_orders o
+           WHERE o.created_at >= local_day.start_at
+             AND EXISTS (
+               SELECT 1 FROM payments p
+               WHERE p.order_id = o.id
+                 AND p.payment_status = 'PAID'
+                 AND p.payment_source = 'DEMO'
+             )
          ), 0)::bigint AS demo_revenue_today
-       FROM orders o
+       FROM operational_orders o
        CROSS JOIN local_day
-       LEFT JOIN payments p ON p.order_id = o.id`,
+       GROUP BY local_day.start_at`,
     );
     res.json({
       summary: summary.rows[0],
@@ -401,12 +418,14 @@ router.get("/orders", async (req, res) => {
     const [orders, statusCount] = await Promise.all([
       db.query(
         `SELECT o.id, o.order_number, o.customer_name, o.customer_phone,
-                o.fulfillment_type, o.order_type, o.table_number,
-                o.total_amount, o.payment_status,
-                o.order_status, o.created_at, p.payment_source
+               o.fulfillment_type, o.order_type, o.table_number,
+               o.total_amount, o.payment_status,
+               o.order_status, o.created_at,
+                (SELECT p.payment_source FROM payments p
+                 WHERE p.order_id = o.id LIMIT 1) AS payment_source
          FROM orders o
-         LEFT JOIN payments p ON p.order_id = o.id
-         WHERE ($1 = 'ALL' OR o.order_status = $1)
+         WHERE o.payment_status = 'PAID'
+           AND ($1 = 'ALL' OR o.order_status = $1)
            AND (
              $4::date IS NULL OR (
                o.created_at >= ($4::date::timestamp AT TIME ZONE 'Asia/Kolkata')
@@ -426,12 +445,13 @@ router.get("/orders", async (req, res) => {
            COUNT(*) FILTER (WHERE order_status = 'COMPLETED')::int AS completed,
            COUNT(*) FILTER (WHERE order_status = 'CANCELLED')::int AS cancelled
          FROM orders
-         WHERE (
-           $1::date IS NULL OR (
-             created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Kolkata')
-             AND created_at < (($1::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata')
-           )
-         )`,
+         WHERE payment_status = 'PAID'
+           AND (
+             $1::date IS NULL OR (
+               created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Kolkata')
+               AND created_at < (($1::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata')
+             )
+           )`,
         [parsed.data.date ?? null],
       ),
     ]);
@@ -465,6 +485,82 @@ router.get("/orders", async (req, res) => {
   }
 });
 
+async function listPaymentQueue(
+  queue: "verification" | "reconciliation",
+  req: import("express").Request,
+  res: import("express").Response,
+) {
+  const parsed = z.object({
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+    offset: z.coerce.number().int().min(0).default(0),
+  }).safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Invalid payment queue page." });
+    return;
+  }
+
+  const condition = queue === "verification"
+    ? `o.payment_status = 'PENDING_VERIFICATION'
+       AND p.payment_status = 'PENDING_VERIFICATION'
+       AND o.payment_expires_at > NOW()`
+    : `(o.payment_status IN ('CANCELLED', 'EXPIRED')
+        OR (
+          o.payment_status IN ('PENDING_PAYMENT', 'PENDING_VERIFICATION')
+          AND o.payment_expires_at <= NOW()
+        )
+        OR p.reconciliation_required IS TRUE)
+       AND p.payment_status IN (
+         'PENDING_PAYMENT', 'PENDING_VERIFICATION', 'CANCELLED', 'EXPIRED'
+       )`;
+  try {
+    const [orders, count] = await Promise.all([
+      db.query(
+        `SELECT o.id, o.order_number, o.customer_name, o.customer_phone,
+                o.fulfillment_type, o.order_type, o.table_number,
+                o.total_amount, o.payment_status, o.order_status,
+                o.created_at, o.payment_expires_at,
+                p.payment_source, p.payment_status AS recorded_payment_status,
+                p.transaction_reference, p.reconciliation_required
+         FROM orders o
+         JOIN payments p ON p.order_id = o.id
+         WHERE p.payment_source = 'MANUAL_UPI'
+           AND (${condition})
+         ORDER BY o.created_at ASC, o.id ASC
+         LIMIT $1 OFFSET $2`,
+        [parsed.data.limit, parsed.data.offset],
+      ),
+      db.query(
+        `SELECT COUNT(*)::int AS total
+         FROM orders o
+         JOIN payments p ON p.order_id = o.id
+         WHERE p.payment_source = 'MANUAL_UPI'
+           AND (${condition})`,
+      ),
+    ]);
+    const total = count.rows[0].total as number;
+    res.json({
+      items: orders.rows,
+      total,
+      limit: parsed.data.limit,
+      offset: parsed.data.offset,
+      totalPages: Math.max(1, Math.ceil(total / parsed.data.limit)),
+    });
+  } catch (error) {
+    console.error(`Admin ${queue} payment queue query failed`, {
+      code: (error as { code?: string }).code,
+    });
+    res.status(500).json({ message: "Unable to load payment claims." });
+  }
+}
+
+router.get("/payment-claims", async (req, res) => {
+  await listPaymentQueue("verification", req, res);
+});
+
+router.get("/payment-reconciliation", async (req, res) => {
+  await listPaymentQueue("reconciliation", req, res);
+});
+
 router.get("/orders/:orderId", async (req, res) => {
   const orderId = z.string().uuid().safeParse(req.params.orderId);
   if (!orderId.success) {
@@ -475,11 +571,12 @@ router.get("/orders/:orderId", async (req, res) => {
     const result = await db.query(
       `SELECT o.id, o.order_number, o.customer_name, o.customer_phone,
               o.fulfillment_type, o.order_type, o.table_number,
-              o.total_amount, o.payment_status,
+              o.total_amount, o.payment_status, o.payment_expires_at,
               o.order_status, o.created_at,
               p.payment_status AS recorded_payment_status,
               p.payment_source, p.transaction_reference,
               p.verified_transaction_reference, p.verified_by, p.verified_at,
+              p.reconciliation_required, p.reconciliation_flagged_at,
               COALESCE(
                 json_agg(json_build_object(
                   'productId', oi.product_id,
@@ -494,6 +591,18 @@ router.get("/orders/:orderId", async (req, res) => {
        LEFT JOIN payments p ON p.order_id = o.id
        LEFT JOIN order_items oi ON oi.order_id = o.id
        WHERE o.id = $1
+         AND (
+           o.payment_status = 'PAID'
+           OR (p.payment_source = 'MANUAL_UPI' AND (
+             p.payment_status = 'PENDING_VERIFICATION'
+             OR o.payment_status = 'REJECTED'
+             OR o.payment_status IN ('CANCELLED', 'EXPIRED')
+             OR (
+               o.payment_status IN ('PENDING_PAYMENT', 'PENDING_VERIFICATION')
+               AND o.payment_expires_at <= NOW()
+             )
+           ))
+         )
        GROUP BY o.id, p.id`,
       [orderId.data],
     );
@@ -535,6 +644,13 @@ router.patch("/orders/:orderId/status", async (req, res) => {
     if (!order) {
       await client.query("ROLLBACK");
       res.status(404).json({ message: "Order not found." });
+      return;
+    }
+    if (order.payment_status !== "PAID") {
+      await client.query("ROLLBACK");
+      res.status(409).json({
+        message: "Payment must be verified before an order can be prepared.",
+      });
       return;
     }
     const allowedNext: Record<string, string> = {
@@ -600,8 +716,10 @@ router.post("/orders/:orderId/payment-verification", async (req, res) => {
   try {
     await client.query("BEGIN");
     const result = await client.query(
-      `SELECT o.payment_status, p.payment_status AS recorded_payment_status,
-              p.payment_source
+      `SELECT o.payment_status, o.order_status, o.payment_expires_at,
+              (o.payment_expires_at <= NOW()) AS payment_expired,
+              p.payment_status AS recorded_payment_status, p.payment_source,
+              p.verified_transaction_reference, p.reconciliation_required
        FROM orders o
        JOIN payments p ON p.order_id = o.id
        WHERE o.id = $1
@@ -614,9 +732,72 @@ router.post("/orders/:orderId/payment-verification", async (req, res) => {
       res.status(404).json({ message: "Order payment not found." });
       return;
     }
+    const decision = parsedBody.data.decision;
+    const reference =
+      decision === "PAID"
+        ? parsedBody.data.verifiedTransactionReference
+        : null;
+
     if (
-      payment.payment_source !== "MANUAL_UPI" ||
-      payment.recorded_payment_status !== "PENDING_VERIFICATION"
+      decision === "PAID" &&
+      payment.payment_source === "MANUAL_UPI" &&
+      payment.recorded_payment_status === "PAID" &&
+      payment.verified_transaction_reference === reference
+    ) {
+      await client.query("COMMIT");
+      res.json({
+        orderId: orderId.data,
+        paymentStatus: "PAID",
+        verifiedBy: res.locals.adminId as string,
+        reconciliationRequired: false,
+      });
+      return;
+    }
+
+    if (
+      decision === "PAID" &&
+      payment.payment_source === "MANUAL_UPI" &&
+      payment.reconciliation_required === true &&
+      payment.verified_transaction_reference === reference
+    ) {
+      await client.query("COMMIT");
+      res.json({
+        orderId: orderId.data,
+        paymentStatus: payment.payment_status,
+        verifiedBy: res.locals.adminId as string,
+        reconciliationRequired: true,
+      });
+      return;
+    }
+
+    if (payment.reconciliation_required === true) {
+      await client.query("ROLLBACK");
+      res.status(409).json({
+        message: "This payment is already flagged for reconciliation.",
+      });
+      return;
+    }
+
+    if (payment.payment_source !== "MANUAL_UPI") {
+      await client.query("ROLLBACK");
+      res.status(409).json({
+        message: "Only manual UPI payments can be verified here.",
+      });
+      return;
+    }
+
+    const expiredByTime =
+      ["PENDING_PAYMENT", "PENDING_VERIFICATION"].includes(
+        payment.payment_status,
+      ) &&
+      payment.payment_expired === true;
+    const stale =
+      ["CANCELLED", "EXPIRED"].includes(payment.payment_status) ||
+      expiredByTime;
+    if (
+      !stale &&
+      (payment.payment_status !== "PENDING_VERIFICATION" ||
+        payment.recorded_payment_status !== "PENDING_VERIFICATION")
     ) {
       await client.query("ROLLBACK");
       res.status(409).json({
@@ -625,33 +806,56 @@ router.post("/orders/:orderId/payment-verification", async (req, res) => {
       return;
     }
 
-    const reference =
-      parsedBody.data.decision === "PAID"
-        ? parsedBody.data.verifiedTransactionReference
-        : null;
+    const resultingStatus = stale
+      ? expiredByTime || payment.payment_status === "EXPIRED"
+        ? "EXPIRED"
+        : "CANCELLED"
+      : decision;
+    if (stale) {
+      await client.query(
+        `UPDATE orders SET payment_status = $2
+         WHERE id = $1
+           AND payment_status IN (
+             'PENDING_PAYMENT', 'PENDING_VERIFICATION', 'CANCELLED', 'EXPIRED'
+           )`,
+        [orderId.data, resultingStatus],
+      );
+    }
     await client.query(
       `UPDATE payments
        SET payment_status = $2,
            verified_by = $3,
            verified_at = NOW(),
-           verified_transaction_reference = $4
+           verified_transaction_reference = $4,
+           reconciliation_required = $5,
+           reconciliation_flagged_at = CASE WHEN $5 THEN NOW() ELSE NULL END
        WHERE order_id = $1`,
       [
         orderId.data,
-        parsedBody.data.decision,
+        stale && decision === "PAID" ? resultingStatus : decision,
         res.locals.adminId as string,
         reference,
+        stale && decision === "PAID",
       ],
     );
-    await client.query(
-      `UPDATE orders SET payment_status = $2 WHERE id = $1`,
-      [orderId.data, parsedBody.data.decision],
-    );
+    if (!stale) {
+      await client.query(
+        `UPDATE orders
+         SET payment_status = $2,
+             order_status = CASE WHEN $2 = 'PAID' THEN 'PLACED' ELSE order_status END
+         WHERE id = $1`,
+        [orderId.data, decision],
+      );
+    }
     await client.query("COMMIT");
+    if (!stale && decision === "PAID") {
+      publishOrderStatus(orderId.data, "PLACED");
+    }
     res.json({
       orderId: orderId.data,
-      paymentStatus: parsedBody.data.decision,
+      paymentStatus: stale && decision === "PAID" ? resultingStatus : decision,
       verifiedBy: res.locals.adminId as string,
+      reconciliationRequired: stale && decision === "PAID",
     });
   } catch (error) {
     await client.query("ROLLBACK");

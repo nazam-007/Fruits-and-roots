@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRight, Check, Clock3, ShoppingBag, Utensils } from "luc
 import { useCart } from "../../context/useCart";
 import { useCheckout } from "../../context/CheckoutContext";
 import { useMenu } from "../../context/MenuContext";
-import { submitOrder } from "../../services/ordersApi";
+import { OrderApiError, submitOrder } from "../../services/ordersApi";
 import type { OrderType } from "../../services/ordersApi";
 
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
@@ -161,6 +161,20 @@ export default function Checkout() {
       );
       navigate(`/payment/${order.orderId}`);
     } catch (error) {
+      if (
+        error instanceof OrderApiError &&
+        error.code === "PAYMENT_ATTEMPT_ENDED"
+      ) {
+        try {
+          window.sessionStorage.removeItem(IDEMPOTENCY_STORAGE_KEY);
+        } catch (storageError) {
+          console.error("Unable to clear the expired checkout key.", storageError);
+        }
+        setFormError(
+          "Your previous payment attempt ended. Your cart is saved; press Continue to Payment again to start a new attempt.",
+        );
+        return;
+      }
       setFormError(
         error instanceof Error
           ? error.message

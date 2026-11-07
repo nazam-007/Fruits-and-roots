@@ -3,6 +3,7 @@ import type { CartItem } from "../context/cartContextStore";
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export type OrderStatus =
+  | "PENDING_PAYMENT"
   | "PLACED"
   | "PREPARING"
   | "READY"
@@ -15,7 +16,9 @@ export type PaymentStatus =
   | "PENDING_PAYMENT"
   | "PENDING_VERIFICATION"
   | "PAID"
-  | "REJECTED";
+  | "REJECTED"
+  | "CANCELLED"
+  | "EXPIRED";
 
 export type PaymentSource = "DEMO" | "MANUAL_UPI" | null;
 
@@ -36,6 +39,7 @@ export type OrderDetails = {
   orderType?: OrderType;
   totalAmount: number;
   paymentStatus: PaymentStatus;
+  paymentExpiresAt?: string;
   paymentSource: PaymentSource;
   orderStatus: OrderStatus;
   createdAt: string;
@@ -69,6 +73,7 @@ async function readResponse<T>(response: Response): Promise<T> {
         ? data.message
         : "The request could not be completed. Please try again.",
       response.status,
+      typeof data?.code === "string" ? data.code : undefined,
     );
   }
   return data as T;
@@ -76,11 +81,13 @@ async function readResponse<T>(response: Response): Promise<T> {
 
 export class OrderApiError extends Error {
   readonly status: number;
+  readonly code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = "OrderApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
