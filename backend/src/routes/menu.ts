@@ -114,6 +114,15 @@ router.get("/", async (_req, res) => {
         p.availability_status,
         p.description,
         p.featured,
+        COALESCE(
+          (
+            SELECT json_agg(tag.name ORDER BY lower(tag.name), tag.name)
+            FROM product_tags product_tag
+            JOIN tags tag ON tag.id = product_tag.tag_id
+            WHERE product_tag.product_id = p.id
+          ),
+          '[]'::json
+        ) AS tags,
         EXISTS (
           SELECT 1
           FROM product_variants regular_variant
@@ -158,6 +167,7 @@ router.get("/", async (_req, res) => {
       availabilityStatus: item.availability_status,
       description: item.description,
       featured: item.featured,
+      tags: item.tags,
       variants: item.variants,
     }));
 

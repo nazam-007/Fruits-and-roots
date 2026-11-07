@@ -267,8 +267,8 @@ export default function Home() {
                       imageClassName="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-105"
                       fallbackClassName="absolute inset-0 flex items-center justify-center text-5xl text-[#31573a]"
                     />
-                    <span className="absolute left-3 top-3 rounded-full bg-[#fff7e9]/95 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#8d562e] shadow-sm sm:text-xs">
-                      House favorite
+                    <span className="absolute left-3 top-3 max-w-[calc(100%-1.5rem)] truncate rounded-full bg-[#fff7e9]/95 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#8d562e] shadow-sm sm:text-xs">
+                      {item.tags?.[0] ?? "House favorite"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 p-3.5 sm:p-5">

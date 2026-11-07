@@ -874,6 +874,7 @@ router.post("/orders/:orderId/payment-verification", async (req, res) => {
 });
 
 const menuStatusSchema = z.enum(["AVAILABLE", "SOLD_OUT", "COMING_SOON"]);
+const tagIdSchema = z.string().uuid();
 const menuProductSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().max(1000).default(""),
@@ -883,17 +884,54 @@ const menuProductSchema = z.object({
     .nullable(),
   availabilityStatus: menuStatusSchema,
   featured: z.boolean(),
+  tagIds: z.array(tagIdSchema).max(100).optional()
+    .refine((tagIds) => !tagIds || new Set(tagIds).size === tagIds.length),
   regularPrice: z.number().int().positive().max(1_000_000),
   largePrice: z.number().int().positive().max(1_000_000).nullable(),
 }).strict();
 
 const productIdSchema = z.string().min(1).max(120).regex(/^[A-Za-z0-9_&-]+$/);
 
+async function replaceProductTags(
+  client: import("pg").PoolClient,
+  productId: string,
+  tagIds: string[] | undefined,
+) {
+  if (tagIds === undefined) return true;
+  const existingTags = await client.query(
+    "SELECT id FROM tags WHERE id = ANY($1::uuid[]) FOR KEY SHARE",
+    [tagIds],
+  );
+  if (existingTags.rowCount !== tagIds.length) return false;
+  await client.query("DELETE FROM product_tags WHERE product_id = $1", [productId]);
+  if (tagIds.length > 0) {
+    await client.query(
+      `INSERT INTO product_tags (product_id, tag_id)
+       SELECT $1, selected.tag_id
+       FROM unnest($2::uuid[]) AS selected(tag_id)`,
+      [productId, tagIds],
+    );
+  }
+  return true;
+}
+
 async function getAdminMenuProduct(productId: string) {
   const result = await db.query(
     `SELECT p.id, p.name, p.description, p.category_id,
             c.name AS category, p.image_url,
             p.availability_status, p.featured, p.archived_at,
+            COALESCE(
+              (
+                SELECT json_agg(
+                         json_build_object('id', tag.id, 'name', tag.name)
+                         ORDER BY lower(tag.name), tag.name
+                       )
+                FROM product_tags product_tag
+                JOIN tags tag ON tag.id = product_tag.tag_id
+                WHERE product_tag.product_id = p.id
+              ),
+              '[]'::json
+            ) AS tags,
             COALESCE(
               json_agg(json_build_object('size', v.size, 'price', v.price)
                        ORDER BY CASE v.size WHEN 'Regular' THEN 1 WHEN 'Large' THEN 2 ELSE 3 END)
@@ -919,6 +957,7 @@ async function getAdminMenuProduct(productId: string) {
     availabilityStatus: row.availability_status as z.infer<typeof menuStatusSchema>,
     featured: row.featured === true,
     archived: row.archived_at !== null,
+    tags: row.tags as Array<{ id: string; name: string }>,
     variants: row.variants as Array<{ size: "Regular" | "Large"; price: number }>,
   };
 }
@@ -934,9 +973,137 @@ function menuProductResponse(row: Record<string, unknown>) {
     availabilityStatus: row.availability_status,
     featured: row.featured === true,
     archived: row.archived_at !== null,
+    tags: row.tags ?? [],
     variants: row.variants,
   };
 }
+
+const tagNameSchema = z.string().trim().min(1).max(50);
+
+router.get("/tags", async (_req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT tag.id, tag.name,
+              COUNT(product_tag.product_id)::int AS "productCount"
+       FROM tags tag
+       LEFT JOIN product_tags product_tag ON product_tag.tag_id = tag.id
+       GROUP BY tag.id
+       ORDER BY lower(tag.name), tag.name`,
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Admin tag listing failed", {
+      code: (error as { code?: string }).code,
+    });
+    res.status(500).json({ message: "Unable to load product tags." });
+  }
+});
+
+router.post("/tags", async (req, res) => {
+  const parsed = z.object({ name: tagNameSchema }).strict().safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ message: "Enter a product tag up to 50 characters." });
+    return;
+  }
+  try {
+    const result = await db.query(
+      `INSERT INTO tags (name)
+       VALUES ($1)
+       RETURNING id, name`,
+      [parsed.data.name],
+    );
+    res.status(201).json({ ...result.rows[0], productCount: 0 });
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === "23505") {
+      res.status(409).json({ message: "A tag with this name already exists." });
+      return;
+    }
+    console.error("Admin tag creation failed", { code });
+    res.status(500).json({ message: "Unable to create the product tag." });
+  }
+});
+
+router.patch("/tags/:tagId", async (req, res) => {
+  const tagId = tagIdSchema.safeParse(req.params.tagId);
+  const parsed = z.object({ name: tagNameSchema }).strict().safeParse(req.body);
+  if (!tagId.success || !parsed.success) {
+    res.status(400).json({ message: "Enter a valid product tag name." });
+    return;
+  }
+  try {
+    const result = await db.query(
+      `UPDATE tags SET name = $2
+       WHERE id = $1
+       RETURNING id, name,
+         (SELECT COUNT(*)::int FROM product_tags WHERE tag_id = $1) AS "productCount"`,
+      [tagId.data, parsed.data.name],
+    );
+    if (!result.rows[0]) {
+      res.status(404).json({ message: "Product tag not found." });
+      return;
+    }
+    publishCatalogChange();
+    res.json(result.rows[0]);
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    if (code === "23505") {
+      res.status(409).json({ message: "A tag with this name already exists." });
+      return;
+    }
+    console.error("Admin tag rename failed", { code });
+    res.status(500).json({ message: "Unable to rename the product tag." });
+  }
+});
+
+router.delete("/tags/:tagId", async (req, res) => {
+  const tagId = tagIdSchema.safeParse(req.params.tagId);
+  const parsed = z.object({
+    confirmAssignedProducts: z.boolean().default(false),
+  }).strict().safeParse(req.body ?? {});
+  if (!tagId.success || !parsed.success) {
+    res.status(400).json({ message: "Invalid product tag." });
+    return;
+  }
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const tag = await client.query(
+      "SELECT id FROM tags WHERE id = $1 FOR UPDATE",
+      [tagId.data],
+    );
+    if (!tag.rowCount) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ message: "Product tag not found." });
+      return;
+    }
+    const assigned = await client.query(
+      "SELECT COUNT(*)::int AS count FROM product_tags WHERE tag_id = $1",
+      [tagId.data],
+    );
+    const productCount = Number(assigned.rows[0].count);
+    if (productCount > 0 && !parsed.data.confirmAssignedProducts) {
+      await client.query("ROLLBACK");
+      res.status(409).json({
+        message: "Confirm removal of this tag from its assigned products.",
+        productCount,
+      });
+      return;
+    }
+    await client.query("DELETE FROM tags WHERE id = $1", [tagId.data]);
+    await client.query("COMMIT");
+    publishCatalogChange();
+    res.status(204).end();
+  } catch (error) {
+    await client.query("ROLLBACK");
+    console.error("Admin tag deletion failed", {
+      code: (error as { code?: string }).code,
+    });
+    res.status(500).json({ message: "Unable to delete the product tag." });
+  } finally {
+    client.release();
+  }
+});
 
 router.get("/categories", async (_req, res) => {
   try {
@@ -1167,6 +1334,18 @@ router.get("/menu", async (req, res) => {
               c.name AS category, p.image_url,
               p.availability_status, p.featured, p.archived_at,
               COALESCE(
+                (
+                  SELECT json_agg(
+                           json_build_object('id', tag.id, 'name', tag.name)
+                           ORDER BY lower(tag.name), tag.name
+                         )
+                  FROM product_tags product_tag
+                  JOIN tags tag ON tag.id = product_tag.tag_id
+                  WHERE product_tag.product_id = p.id
+                ),
+                '[]'::json
+              ) AS tags,
+              COALESCE(
                 json_agg(json_build_object('size', v.size, 'price', v.price)
                          ORDER BY CASE v.size WHEN 'Regular' THEN 1 WHEN 'Large' THEN 2 ELSE 3 END)
                   FILTER (WHERE v.id IS NOT NULL),
@@ -1233,6 +1412,11 @@ router.post("/menu", async (req, res) => {
         product.featured,
       ],
     );
+    if (!(await replaceProductTags(client, productId, product.tagIds))) {
+      await client.query("ROLLBACK");
+      res.status(400).json({ message: "One or more selected product tags no longer exist." });
+      return;
+    }
     await client.query(
       `INSERT INTO product_variants (product_id, size, price) VALUES ($1, 'Regular', $2)`,
       [productId, product.regularPrice],
@@ -1244,6 +1428,7 @@ router.post("/menu", async (req, res) => {
       );
     }
     await client.query("COMMIT");
+    publishCatalogChange();
     const created = await getAdminMenuProduct(productId);
     res.status(201).json(created);
   } catch (error) {
@@ -1291,6 +1476,11 @@ router.patch("/menu/:productId", async (req, res) => {
       res.status(404).json({ message: "Menu item not found." });
       return;
     }
+    if (!(await replaceProductTags(client, productId.data, product.tagIds))) {
+      await client.query("ROLLBACK");
+      res.status(400).json({ message: "One or more selected product tags no longer exist." });
+      return;
+    }
     await client.query(
       `UPDATE products
        SET name = $2, description = $3, category = $4, category_id = $5,
@@ -1329,6 +1519,7 @@ router.patch("/menu/:productId", async (req, res) => {
       );
     }
     await client.query("COMMIT");
+    publishCatalogChange();
     res.json(await getAdminMenuProduct(productId.data));
   } catch (error) {
     await client.query("ROLLBACK");

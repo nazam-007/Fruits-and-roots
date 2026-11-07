@@ -114,6 +114,19 @@ export default function ProductDetails() {
             {product.name}
           </h1>
 
+          {product.tags && product.tags.length > 0 && (
+            <ul aria-label="Product tags" className="mt-4 flex flex-wrap gap-2">
+              {product.tags.map((tag) => (
+                <li
+                  key={tag}
+                  className="max-w-full break-words rounded-full bg-[#fff7e9] px-3 py-1 text-xs font-semibold text-[#8d562e]"
+                >
+                  {tag}
+                </li>
+              ))}
+            </ul>
+          )}
+
           <p className="mt-4 text-gray-600">
             {product.description || "Freshly prepared with care at Fruits & Roots."}
           </p>

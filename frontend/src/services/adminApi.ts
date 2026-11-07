@@ -88,7 +88,19 @@ export type AdminMenuProduct = {
   availabilityStatus: "AVAILABLE" | "SOLD_OUT" | "COMING_SOON";
   featured: boolean;
   archived: boolean;
+  tags: AdminProductTag[];
   variants: Array<{ size: "Regular" | "Large"; price: number }>;
+};
+
+export type AdminProductTag = {
+  id: string;
+  name: string;
+};
+
+export type AdminMenuTag = {
+  id: string;
+  name: string;
+  productCount: number;
 };
 
 export type AdminCategory = {
@@ -104,6 +116,7 @@ export type AdminMenuProductInput = {
   image: string | null;
   availabilityStatus: "AVAILABLE" | "SOLD_OUT" | "COMING_SOON";
   featured: boolean;
+  tagIds: string[];
   regularPrice: number;
   largePrice: number | null;
 };
@@ -300,6 +313,34 @@ export function fetchAdminMenu(includeArchived = true) {
   return request<AdminMenuProduct[]>(
     `/menu${includeArchived ? "?includeArchived=true" : ""}`,
   );
+}
+
+export function fetchAdminTags() {
+  return request<AdminMenuTag[]>("/tags");
+}
+
+export function createAdminTag(name: string) {
+  return request<AdminMenuTag>("/tags", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function updateAdminTag(tagId: string, name: string) {
+  return request<AdminMenuTag>(`/tags/${encodeURIComponent(tagId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+}
+
+export function deleteAdminTag(
+  tagId: string,
+  confirmAssignedProducts = false,
+) {
+  return request<void>(`/tags/${encodeURIComponent(tagId)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirmAssignedProducts }),
+  });
 }
 
 export function fetchAdminCategories() {

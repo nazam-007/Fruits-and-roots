@@ -15,6 +15,7 @@ export type MenuItem = {
   available: boolean;
   availabilityStatus?: AvailabilityStatus;
   featured?: boolean;
+  tags?: string[];
   image?: string;
   description?: string;
   archived?: boolean;

@@ -9,7 +9,7 @@ Fruits & Roots is a restaurant QR-ordering application with a customer menu and 
 - View order status using the customer order-tracking page.
 - Support demo payment in development and manual UPI payment claims for staff verification.
 - Protect admin pages and APIs with an expiring, HTTP-only session cookie.
-- Manage product descriptions, categories, prices, availability, featured status, images, and archival from the admin menu page.
+- Manage product descriptions, categories, prices, availability, featured status, reusable product tags, images, and archival from the admin menu page.
 - Validate current product availability and prices on the backend when preparing order quotes and creating orders.
 
 ## Technology
@@ -91,8 +91,11 @@ The SQL migrations are in `backend/migrations/` and must be applied to the targe
 10. `010_restaurant_ordering_settings.sql`
 11. `011_restaurant_weekly_opening_hours.sql`
 12. `012_payment_attempt_lifecycle.sql`
+13. `013_product_tags.sql`
 
 Apply migrations only if they have not already been applied to that database. Use a database migration workflow or the Supabase SQL Editor, and verify the result before deploying the application. Do not run migrations against production without a backup and review.
+
+The product-tags migration creates reusable tags and product-tag associations without changing existing `featured` flags or product records. Existing featured badges therefore remain visible; newly managed tags are stored independently.
 
 The backend runs a server-side expiry worker at startup and once per minute. Keep at least one backend process running for timely expiry; payment and admin mutation endpoints also enforce the recorded expiry time. Expired and cancelled payment attempts are retained for audit and reconciliation.
 
