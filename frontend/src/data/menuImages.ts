@@ -38,6 +38,23 @@ export function getMenuItemImage(item: MenuItem): string | undefined {
   return item.image ?? menuItemImages[item.id];
 }
 
+export function getResponsiveImageSources(
+  image: string,
+  widths = [320, 480, 640, 900],
+): string | undefined {
+  const imagePath = image.match(/^https:\/\/images\.unsplash\.com\/[^?]+/)?.[0];
+  if (!imagePath) return undefined;
+
+  const query = new URLSearchParams(image.split("?")[1] ?? "");
+  return widths
+    .map((width) => {
+      const sourceQuery = new URLSearchParams(query);
+      sourceQuery.set("w", String(width));
+      return `${imagePath}?${sourceQuery.toString()} ${width}w`;
+    })
+    .join(", ");
+}
+
 export function getMenuItemFallbackEmoji(item: MenuItem): string {
   switch (item.category) {
     case "Fruitopia":

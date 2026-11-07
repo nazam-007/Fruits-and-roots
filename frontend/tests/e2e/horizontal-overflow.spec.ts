@@ -268,6 +268,463 @@ test("dynamic product tags remain visible without mobile overflow", async ({ bro
   await context.close();
 });
 
+test("category deep links and product details preserve the selected size", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await mockAdminReadApis(context);
+  const page = await context.newPage();
+
+  await page.goto("/menu?category=fruit-bowls");
+  await expect(page.getByRole("button", { name: "Fruit Bowls", exact: true }))
+    .toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("link", { name: "View Seasonal Fruit Bowl" }).click();
+  await page.getByRole("button", { name: "Large — ₹350" }).click();
+  await page.getByRole("button", { name: "Add to Cart" }).last().click();
+  await expect(page.getByText("Large size")).toBeVisible();
+  await expect(page.getByLabel("Cart total")).toContainText("350");
+
+  await page.getByRole("link", { name: /Keep browsing/ }).click();
+  await page.getByRole("link", { name: "View Seasonal Fruit Bowl" }).click();
+  await page.getByRole("button", { name: "Add to Cart" }).click();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Seasonal Fruit Bowl" }))
+    .toBeVisible();
+
+  await context.close();
+});
+
+test("card size selection is modal on mobile, keyboard accessible, and confirms price", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await mockAdminReadApis(context);
+  const page = await context.newPage();
+
+  await page.goto("/menu?category=fruit-bowls");
+  const productCard = page.locator(".menu-product-card").first();
+  await expect(productCard.getByRole("group", { name: /Available sizes/ }))
+    .toHaveCount(0);
+
+  const addButton = productCard.getByRole("button", {
+    name: "Add Seasonal Fruit Bowl to cart",
+  });
+  await addButton.click();
+  const dialog = page.getByRole("dialog", {
+    name: "Seasonal Fruit Bowl",
+  });
+  await expect(dialog).toBeVisible();
+  await page.waitForTimeout(220);
+  const sheetBounds = await dialog.boundingBox();
+  expect(sheetBounds).not.toBeNull();
+  expect(Math.abs(sheetBounds!.y + sheetBounds!.height - 844))
+    .toBeLessThanOrEqual(2);
+  await expect(dialog.getByRole("button", { name: "Regular ₹250" }))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByRole("button", { name: "Large ₹350" }))
+    .toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Mobile navigation" }))
+    .not.toContainText("1");
+
+  await page.mouse.click(10, 100);
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "Mobile navigation" }))
+    .not.toContainText("1");
+
+  await addButton.click();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(addButton).toBeFocused();
+  await expect(page.getByRole("navigation", { name: "Mobile navigation" }))
+    .not.toContainText("1");
+
+  await addButton.click();
+  await dialog.getByRole("button", { name: "Large ₹350" }).click();
+  await dialog.getByRole("button", { name: "Add · ₹350" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "Mobile navigation" }))
+    .toContainText("1");
+  await expect(addButton).toBeFocused();
+
+  const singleSizeCard = page.locator(".menu-product-card").nth(1);
+  await expect(singleSizeCard.getByRole("group", { name: /Available sizes/ }))
+    .toHaveCount(0);
+  await singleSizeCard.getByRole("button", {
+    name: /Add ProductNameWithoutSpaces/,
+  }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Mobile navigation" }))
+    .toContainText("2");
+
+  await page.goto("/cart");
+  await expect(page.getByText("Large size")).toBeVisible();
+  await expect(page.getByLabel("Cart total")).toContainText("600");
+
+  await context.close();
+});
+
+test("card size selection uses a centered desktop dialog", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
+  await mockAdminReadApis(context);
+  const page = await context.newPage();
+
+  await page.goto("/menu?category=fruit-bowls");
+  await page.locator(".menu-product-card").first()
+    .getByRole("button", { name: "Add Seasonal Fruit Bowl to cart" })
+    .click();
+
+  const dialog = page.getByRole("dialog", { name: "Seasonal Fruit Bowl" });
+  await expect(dialog).toBeVisible();
+  await expect(page.locator("dialog:modal")).toHaveCount(1);
+  await page.waitForTimeout(220);
+  const bounds = await dialog.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(Math.abs(bounds!.x + bounds!.width / 2 - 720)).toBeLessThanOrEqual(1);
+  expect(Math.abs(bounds!.y + bounds!.height / 2 - 450)).toBeLessThanOrEqual(1);
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+
+  await context.close();
+});
+
+test("restaurant paused and closed states stay clear on the menu", async ({
+  browser,
+}) => {
+  const openingHours = Object.fromEntries(
+    ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+      .map((day) => [
+        day,
+        { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
+      ]),
+  );
+  for (const [status, expectedLabel] of [
+    ["CLOSED", "Closed Now"],
+    ["PAUSED", "Temporarily Not Accepting Orders"],
+  ] as const) {
+    const context = await browser.newContext({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    await mockAdminReadApis(context);
+    await context.route("**/api/menu/status", async (route) => {
+      await route.fulfill({
+        json: {
+          acceptingOrders: false,
+          openingHours,
+          updatedAt: "2026-11-07T09:00:00.000Z",
+          orderingAvailable: false,
+          status,
+          isScheduledOpen: status === "CLOSED",
+          nextOpenAt: status === "CLOSED" ? "2026-11-08T03:30:00.000Z" : null,
+          timeZone: "Asia/Kolkata",
+        },
+      });
+    });
+    const page = await context.newPage();
+
+    await page.goto("/menu");
+    await expect(page.getByText(expectedLabel)).toBeVisible();
+    if (status === "CLOSED") {
+      await expect(page.getByText(/Opens next:/)).toBeVisible();
+    }
+
+    await context.close();
+  }
+});
+
+test("pending payment cancellation returns the customer to the cart", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await mockAdminReadApis(context);
+  await seedCustomerSession(await context.newPage());
+  await context.route("**/api/orders/responsive-test-order", async (route) => {
+    await route.fulfill({
+      json: {
+        ...orderDetails,
+        orderStatus: "PENDING_PAYMENT",
+        paymentStatus: "PENDING_PAYMENT",
+      },
+    });
+  });
+  await context.route(
+    "**/api/orders/responsive-test-order/payment-cancel",
+    async (route) => {
+      await route.fulfill({ json: { orderId: orderDetails.orderId, paymentStatus: "CANCELLED" } });
+    },
+  );
+  const page = context.pages()[0];
+
+  await page.goto("/payment/responsive-test-order");
+  await expect(page.getByRole("status")).toContainText("QR code unavailable");
+  await page.getByRole("button", { name: "Cancel Payment · Back to Cart" }).click();
+  await expect(page).toHaveURL(/\/cart$/);
+  await expect(page.getByRole("heading", { name: "Your bag" })).toBeVisible();
+
+  await context.close();
+});
+
+test("reduced motion preference softens customer animations", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    reducedMotion: "reduce",
+  });
+  await mockAdminReadApis(context);
+  const page = await context.newPage();
+
+  await page.goto("/menu");
+  const animationDuration = await page.locator(".menu-product-card").first()
+    .evaluate((element) => {
+      const duration = window.getComputedStyle(element).animationDuration;
+      return Number.parseFloat(duration);
+    });
+  expect(animationDuration).toBeLessThan(0.001);
+
+  await context.close();
+});
+
+test("browser back restores the menu scroll position", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await mockAdminReadApis(context);
+  const page = await context.newPage();
+
+  await page.goto("/menu");
+  await page.evaluate(() => window.scrollTo(0, 500));
+  const menuScrollY = await page.evaluate(() => window.scrollY);
+  await page.locator(".menu-product-card").first().locator("a").first().click();
+  await expect(page.getByRole("heading", { name: "Seasonal Fruit Bowl" }))
+    .toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Explore Our Menu" }))
+    .toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.scrollY))
+    .toBeGreaterThan(menuScrollY - 10);
+
+  await context.close();
+});
+
+test("mobile checkout actions yield space to a short keyboard viewport", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 480 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await mockAdminReadApis(context);
+  const page = await context.newPage();
+  await seedCustomerSession(page);
+
+  await page.goto("/checkout");
+  await expect(page.getByLabel("Your name")).toBeVisible();
+  await expect(page.locator(".mobile-sticky-action")).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "Mobile navigation" }))
+    .toBeHidden();
+
+  await context.close();
+});
+
+test("product cards, featured heading, and images stay stable across viewport sizes", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await mockAdminReadApis(context);
+  await context.route("**/api/menu/status", async (route) => {
+    await route.fulfill({
+      json: {
+        acceptingOrders: true,
+        openingHours: Object.fromEntries(
+          ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+            .map((day) => [
+              day,
+              { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
+            ]),
+        ),
+        updatedAt: "2026-11-07T09:00:00.000Z",
+        orderingAvailable: true,
+        status: "OPEN",
+        isScheduledOpen: true,
+        nextOpenAt: null,
+        timeZone: "Asia/Kolkata",
+      },
+    });
+  });
+  await context.route("**/api/menu", async (route) => {
+    await route.fulfill({
+      json: customerMenu.map((item, index) => ({
+        ...item,
+        image: index === 0
+          ? "https://images.unsplash.com/photo-1490474418585-ba9bad8fd0ea?auto=format&fit=crop&w=900&q=85"
+          : item.image,
+      })),
+    });
+  });
+  await context.route("https://images.unsplash.com/**", async (route) => {
+    await route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="450"><rect width="100%" height="100%" fill="#e9eddf"/></svg>',
+    });
+  });
+  const page = await context.newPage();
+
+  for (const width of [320, 360, 375, 390, 414, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: width <= 375 ? 667 : 844 });
+    await page.goto("/menu");
+    const cards = page.locator(".menu-product-card");
+    await expect(cards.first()).toBeVisible();
+    const searchLeft = await page.getByRole("searchbox", {
+      name: "Search menu items",
+    }).evaluate((element) => element.getBoundingClientRect().left);
+    const categoryLeft = await page.getByRole("button", {
+      name: "All Items",
+    }).evaluate((element) => element.getBoundingClientRect().left);
+    expect(Math.abs(searchLeft - categoryLeft)).toBeLessThanOrEqual(1);
+    const cardMetrics = await cards.evaluateAll((elements) =>
+      elements.map((element) => {
+        const card = element.getBoundingClientRect();
+        const image = element.querySelector("a[aria-label^='View']")?.getBoundingClientRect();
+        const action = element.querySelector("button[aria-label^='Add']")?.getBoundingClientRect();
+        const price = element.querySelector('[aria-label="Starting price"], [aria-label="Price"]')?.getBoundingClientRect();
+        return {
+          top: Math.round(card.top),
+          height: Math.round(card.height),
+          right: Math.round(card.right),
+          imageRatio: image ? image.width / image.height : null,
+          imageBottom: image ? Math.round(image.bottom) : null,
+          priceTop: price ? Math.round(price.top) : null,
+          actionBottom: action ? Math.round(action.bottom) : null,
+        };
+      }),
+    );
+
+    expect(await page.evaluate(() => document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(width + 1);
+    const startingPrice = cards.nth(0).getByLabel("Starting price");
+    await expect(startingPrice).toContainText("From");
+    await expect(startingPrice).toContainText("₹250");
+    const priceStyle = await startingPrice.evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      return {
+        fontSize: style.fontSize,
+        fontWeight: Number(style.fontWeight),
+        color: style.color,
+      };
+    });
+    expect(priceStyle.fontSize).toBe("18px");
+    expect(priceStyle.fontWeight).toBeGreaterThanOrEqual(600);
+    expect(priceStyle.color).toBe("rgb(49, 87, 58)");
+    await expect(cards.nth(1).getByLabel("Price")).toHaveText("₹250");
+    for (let index = 0; index < cardMetrics.length; index += 2) {
+      const row = cardMetrics.slice(index, index + 2);
+      if (row.length === 2 && row[0].top === row[1].top) {
+        expect(Math.abs(row[0].height - row[1].height)).toBeLessThanOrEqual(1);
+        const expectedImageRatio = width < 640 ? 3 / 2 : 4 / 3;
+        expect(Math.abs(row[0].imageRatio! - expectedImageRatio)).toBeLessThan(0.02);
+        expect(Math.abs(row[0].priceTop! - row[1].priceTop!)).toBeLessThanOrEqual(1);
+        expect(Math.abs(row[0].actionBottom! - row[1].actionBottom!))
+          .toBeLessThanOrEqual(1);
+      }
+    }
+
+    const firstImage = cards.first().locator("img");
+    await expect(firstImage).toHaveAttribute("loading", "eager");
+    await expect(firstImage).toHaveAttribute("srcset", /320w.*480w.*640w/);
+    await expect(firstImage).toHaveAttribute("sizes", /50vw/);
+    await expect(cards.nth(0).getByRole("group", { name: /Available sizes/ }))
+      .toHaveCount(0);
+    await expect(cards.nth(1).getByRole("group", { name: /Available sizes/ }))
+      .toHaveCount(0);
+    await expect(cards.nth(1).getByRole("button", { name: /Add .* to cart/ }))
+      .toBeVisible();
+  }
+
+  await page.goto("/");
+  for (const width of [320, 375, 390, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.getByRole("heading", { name: "A few good picks" }).scrollIntoViewIfNeeded();
+    const heading = await page.getByRole("heading", { name: "A few good picks" }).boundingBox();
+    const seeAll = await page.getByRole("link", { name: /See all/ }).boundingBox();
+    expect(heading).not.toBeNull();
+    expect(seeAll).not.toBeNull();
+    expect(heading!.x + heading!.width).toBeLessThanOrEqual(seeAll!.x + 1);
+    expect(heading!.height).toBeLessThan(width < 640 ? 42 : 48);
+  }
+
+  await context.close();
+});
+
+test("cart totals remain above the fixed checkout action and quantity stays responsive", async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await mockAdminReadApis(context);
+  const page = await context.newPage();
+  await seedCustomerSession(page);
+
+  for (const width of [320, 360, 375, 390, 414, 430, 768, 1440]) {
+    await page.setViewportSize({ width, height: width <= 375 ? 667 : 844 });
+    await page.goto("/cart");
+    await expect(page.getByRole("heading", { name: "Your bag" })).toBeVisible();
+    const total = page.getByLabel("Cart total");
+    const totalBefore = Number((await total.innerText()).replace(/[^\d]/g, ""));
+    await page.getByRole("button", {
+      name: "Increase Seasonal Fruit Bowl quantity",
+    }).click();
+    await expect(total).toContainText(String(totalBefore + 250));
+    expect(await page.evaluate(() => document.documentElement.scrollWidth))
+      .toBeLessThanOrEqual(width + 1);
+
+    if (width <= 430) {
+      await page.evaluate(() =>
+        window.scrollTo(0, document.documentElement.scrollHeight),
+      );
+      const geometry = await page.evaluate(() => {
+        const action = document.querySelector(".mobile-sticky-action")?.getBoundingClientRect();
+        const nav = document.querySelector('[aria-label="Mobile navigation"]')?.getBoundingClientRect();
+        const total = document.querySelector('[aria-label="Cart total"]')?.getBoundingClientRect();
+        return { action, nav, total };
+      });
+      expect(geometry.action).not.toBeUndefined();
+      expect(geometry.nav).not.toBeUndefined();
+      expect(geometry.total).not.toBeUndefined();
+      expect(Math.abs(geometry.action!.bottom - geometry.nav!.top)).toBeLessThanOrEqual(1);
+      expect(geometry.total!.bottom).toBeLessThanOrEqual(geometry.action!.top);
+    }
+  }
+
+  await context.close();
+});
+
 for (const viewport of viewports) {
   test(`all customer and admin routes fit at ${viewport.width}px`, async ({ browser }, testInfo) => {
     test.skip(
@@ -319,7 +776,7 @@ for (const viewport of viewports) {
         await expect(page.getByLabel("Your name")).toBeVisible();
         await expect(page.getByLabel(/Phone number/)).toBeVisible();
       } else if (route === "/payment/responsive-test-order") {
-        await expect(page.getByRole("heading", { name: "Complete Your Payment" })).toBeVisible();
+        await expect(page.getByRole("heading", { name: "Payment received" })).toBeVisible();
       } else if (route === "/order/responsive-test-order") {
         await expect(page.getByRole("heading", { name: "Your order is in" })).toBeVisible();
       } else if (route === "/admin/login") {

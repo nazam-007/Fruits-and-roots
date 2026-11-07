@@ -23,6 +23,15 @@ export type CartContextType = {
   removeFromCart: (id: string, size: MenuVariant["size"]) => void;
 };
 
+export type CartActionsContextType = Pick<
+  CartContextType,
+  "addToCart" | "clearCart" | "removeFromCart" | "updateQuantity"
+>;
+
 export const CartContext = createContext<CartContextType | undefined>(
   undefined,
 );
+
+export const CartActionsContext = createContext<
+  CartActionsContextType | undefined
+>(undefined);

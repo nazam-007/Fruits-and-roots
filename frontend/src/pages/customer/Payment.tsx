@@ -224,6 +224,15 @@ export default function Payment() {
     "EXPIRED",
     "REJECTED",
   ].includes(order.paymentStatus);
+  const paymentPageTitle = paymentAttemptEnded
+    ? order.paymentStatus === "CANCELLED"
+      ? "Payment cancelled"
+      : "Payment attempt ended"
+    : order.paymentStatus === "PAID"
+      ? "Payment received"
+      : order.paymentStatus === "PENDING_VERIFICATION"
+        ? "Payment submitted"
+        : "Complete Your Payment";
 
   return (
     <div className="mx-auto max-w-6xl pb-24 sm:pb-8">
@@ -246,10 +255,16 @@ export default function Payment() {
             : `Takeaway · ${order.orderNumber}`}
         </p>
         <h1 className="font-serif text-3xl font-semibold tracking-tight text-[#253b2a] sm:text-4xl">
-          Complete Your Payment
+          {paymentPageTitle}
         </h1>
         <p className="mt-2 text-sm leading-6 text-[#73796d] sm:text-base">
-          Scan the QR code using your preferred UPI app.
+        {paymentAttemptEnded
+          ? "This payment attempt is no longer active."
+          : order.paymentStatus === "PAID"
+            ? "Your payment is confirmed. You can follow preparation on the tracking page."
+            : order.paymentStatus === "PENDING_VERIFICATION"
+              ? "Your payment reference was received and is awaiting staff verification."
+              : "Scan the QR code using your preferred UPI app."}
         </p>
         {order.paymentExpiresAt && paymentCanBeCancelled && (
           <p className="mt-2 text-xs text-[#73796d]">
@@ -284,7 +299,7 @@ export default function Payment() {
       )}
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-8">
-        <section className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-[0_8px_30px_-25px_rgba(30,51,35,0.5)] sm:p-6">
+        <section className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-4 shadow-[0_8px_30px_-25px_rgba(30,51,35,0.5)] sm:p-6">
           <div className="mb-5">
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#b56b36]">
               UPI payment
@@ -349,11 +364,20 @@ export default function Payment() {
               </div>
 
               <div className="rounded-2xl border border-[#e5e2d6] bg-[#f8f8f2] p-4 text-center">
-                <img
-                  src={paymentDetails.qrCodeDataUrl}
-                  alt={`UPI QR code for order ${order.orderNumber} totaling ${formatPrice(order.totalAmount)}`}
-                  className="mx-auto h-56 w-56 max-w-full rounded-xl bg-white p-2"
-                />
+                {paymentDetails.qrCodeDataUrl ? (
+                  <img
+                    src={paymentDetails.qrCodeDataUrl}
+                    alt={`UPI QR code for order ${order.orderNumber} totaling ${formatPrice(order.totalAmount)}`}
+                    className="mx-auto h-56 w-56 max-w-full rounded-xl bg-white p-2"
+                  />
+                ) : (
+                  <p
+                    role="status"
+                    className="flex min-h-56 items-center justify-center rounded-xl bg-white p-4 text-sm text-[#73796d]"
+                  >
+                    QR code unavailable. Use the UPI ID and total to complete payment.
+                  </p>
+                )}
                 <p className="mt-2 text-xs text-[#73796d]">
                   Verify recipient and amount before paying.
                 </p>
@@ -476,7 +500,13 @@ export default function Payment() {
           <h2 className="font-serif text-xl font-semibold text-[#253b2a] sm:text-2xl">
             Your order
           </h2>
-          <p className="mt-1 text-sm text-[#73796d]">Counter pickup</p>
+          <p className="mt-1 text-sm text-[#73796d]">
+            {(order.orderType ??
+              (order.fulfillmentType === "TABLE" ? "DINE_IN" : "TAKEAWAY")) ===
+            "DINE_IN"
+              ? `Dine-in${order.tableNumber ? ` · Table ${order.tableNumber}` : ""}`
+              : "Takeaway"}
+          </p>
           <ul className="mt-5 max-h-64 space-y-3 overflow-y-auto border-b border-[#eeece4] pb-5">
             {order.items.map((item, index) => (
               <li

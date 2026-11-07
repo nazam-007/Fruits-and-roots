@@ -87,17 +87,17 @@ export default function ProductDetails() {
   };
 
   return (
-    <div className="mx-auto max-w-5xl pb-24">
+    <div className="mx-auto max-w-5xl pb-28 sm:pb-8">
       <Link
         to="/menu"
-        className="mb-6 inline-flex items-center gap-2 text-sm font-medium text-[#354632]"
+        className="mb-4 inline-flex min-h-11 items-center gap-2 text-sm font-medium text-[#354632] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36]"
       >
         <ArrowLeft size={18} />
         Back to Menu
       </Link>
 
-      <div className="grid gap-8 md:grid-cols-2">
-        <div className="relative flex aspect-square items-center justify-center overflow-hidden rounded-3xl bg-[#E8EDDF]">
+      <div className="grid gap-5 sm:gap-8 md:grid-cols-2">
+        <div className="relative flex aspect-[4/3] items-center justify-center overflow-hidden rounded-3xl bg-[#E8EDDF] sm:aspect-square">
           <MenuItemImage
             item={product}
             imageClassName="absolute inset-0 h-full w-full object-cover"
@@ -106,11 +106,11 @@ export default function ProductDetails() {
         </div>
 
         <div className="min-w-0 flex flex-col justify-center">
-          <p className="text-sm font-semibold uppercase tracking-widest text-orange-600">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#b56b36]">
             {product.category}
           </p>
 
-          <h1 className="mt-3 break-words text-3xl font-bold text-[#354632] sm:text-4xl">
+          <h1 className="mt-2 break-words font-serif text-3xl font-semibold tracking-tight text-[#253b2a] sm:mt-3 sm:text-4xl">
             {product.name}
           </h1>
 
@@ -127,7 +127,7 @@ export default function ProductDetails() {
             </ul>
           )}
 
-          <p className="mt-4 text-gray-600">
+          <p className="mt-3 text-sm leading-6 text-[#73796d] sm:mt-4 sm:text-base">
             {product.description || "Freshly prepared with care at Fruits & Roots."}
           </p>
 
@@ -141,7 +141,7 @@ export default function ProductDetails() {
             </p>
           ) : (
             <>
-              <h2 className="mt-8 font-semibold text-[#354632]">
+              <h2 className="mt-5 font-semibold text-[#354632] sm:mt-8">
                 Choose your size
               </h2>
 
@@ -156,7 +156,7 @@ export default function ProductDetails() {
                     aria-pressed={
                       activeVariant.size === variant.size
                     }
-                    className={`rounded-xl border px-5 py-3 text-sm font-semibold transition ${
+                    className={`min-h-11 rounded-xl border px-4 py-2.5 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] ${
                       activeVariant.size === variant.size
                         ? "border-[#354632] bg-[#354632] text-white"
                         : "border-gray-200 bg-white text-gray-700"
@@ -167,7 +167,7 @@ export default function ProductDetails() {
                 ))}
               </div>
 
-              <h2 className="mt-8 font-semibold text-[#354632]">
+              <h2 className="mt-5 font-semibold text-[#354632] sm:mt-8">
                 Quantity
               </h2>
 
@@ -178,7 +178,7 @@ export default function ProductDetails() {
                     setQuantity((q) => Math.max(1, q - 1))
                   }
                   disabled={quantity <= 1}
-                  className="px-5 py-3 disabled:opacity-40"
+                  className="flex h-11 w-11 items-center justify-center disabled:opacity-40"
                   aria-label="Decrease quantity"
                 >
                   −
@@ -191,14 +191,14 @@ export default function ProductDetails() {
                 <button
                   type="button"
                   onClick={() => setQuantity((q) => q + 1)}
-                  className="px-5 py-3"
+                  className="flex h-11 w-11 items-center justify-center"
                   aria-label="Increase quantity"
                 >
                   +
                 </button>
               </div>
 
-              <div className="mt-10 flex items-center justify-between">
+              <div className="mt-6 flex items-center justify-between sm:mt-10">
                 <span className="text-gray-500">Total</span>
                 <span className="text-3xl font-bold text-[#354632]">
                   ₹{total}
@@ -208,7 +208,7 @@ export default function ProductDetails() {
               <button
                 type="button"
                 onClick={handleAddToCart}
-                className="mt-5 inline-flex items-center justify-center gap-3 rounded-2xl bg-[#354632] px-6 py-4 font-semibold text-white hover:bg-[#263524]"
+                className="mt-5 hidden min-h-12 items-center justify-center gap-3 rounded-2xl bg-[#354632] px-6 font-semibold text-white transition hover:bg-[#263524] active:scale-[0.99] sm:inline-flex"
               >
                 <ShoppingCart size={20} />
                 Add to Cart
@@ -217,6 +217,24 @@ export default function ProductDetails() {
           )}
         </div>
       </div>
+      {isAvailable && (
+        <div
+          className="mobile-sticky-action fixed inset-x-0 z-40 border-t border-[#e9e6da] bg-[#fffdf7]/95 px-4 pt-3 shadow-[0_-12px_32px_-24px_rgba(36,49,34,0.65)] backdrop-blur-lg sm:hidden"
+          style={{ bottom: "var(--customer-mobile-nav-offset)" }}
+        >
+          <button
+            type="button"
+            onClick={handleAddToCart}
+            className="mx-auto flex min-h-12 w-full max-w-lg items-center justify-between gap-3 rounded-full bg-[#31573a] px-5 font-semibold text-white transition active:scale-[0.99] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2"
+          >
+            <span className="inline-flex items-center gap-2">
+              <ShoppingCart size={17} aria-hidden="true" />
+              Add to Cart
+            </span>
+            <span className="tabular-nums">₹{total}</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

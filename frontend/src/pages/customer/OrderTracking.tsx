@@ -326,7 +326,7 @@ export default function OrderTracking() {
 
       <section
         aria-labelledby="payment-status-heading"
-        className={`mb-6 rounded-3xl border p-5 sm:p-6 ${
+        className={`mb-5 rounded-3xl border p-4 transition-colors duration-300 sm:mb-6 sm:p-6 ${
           isPaid
             ? "border-[#c9ddc4] bg-[#f2f7ee]"
             : "border-[#eed8b6] bg-[#fff8ed]"
@@ -349,7 +349,7 @@ export default function OrderTracking() {
                 ? "Demo Paid"
                 : paymentStatusLabels[order.paymentStatus]}
             </h2>
-            <p className="mt-1 text-sm leading-6 text-[#6d7468]">
+            <p role="status" aria-live="polite" className="mt-1 text-sm leading-6 text-[#6d7468]">
               {order.paymentSource === "DEMO" &&
               order.paymentStatus === "PAID" ? (
                 <>
@@ -383,7 +383,7 @@ export default function OrderTracking() {
       </section>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <section className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-sm sm:p-6">
+        <section className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-4 shadow-sm sm:p-6">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#b56b36]">
@@ -413,11 +413,12 @@ export default function OrderTracking() {
               return (
                 <li key={status} className="flex items-center gap-3">
                   <span
+                    aria-current={active ? "step" : undefined}
                     className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
                       complete
                         ? "bg-[#31573a] text-white"
                         : "bg-[#f1f0e9] text-[#858a7e]"
-                    }`}
+                    } transition-colors duration-300`}
                   >
                     {complete ? (
                       <Check size={16} aria-hidden="true" />

@@ -1,11 +1,14 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
 import {
+  CartActionsContext,
   CartContext,
+  type CartActionsContextType,
   type CartContextType,
   type CartItem,
 } from "./cartContextStore";
@@ -51,6 +54,68 @@ function loadCart(): CartItem[] {
 export function CartProvider({ children }: { children: ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>(loadCart);
 
+  const clearCart = useCallback(() => setCart([]), []);
+  const addToCart = useCallback((newItem: CartItem) => {
+    if (!Number.isInteger(newItem.quantity) || newItem.quantity < 1) {
+      throw new Error("Cart quantity must be a positive integer");
+    }
+
+    setCart((items) => {
+      const existingItem = items.find(
+        (item) => item.id === newItem.id && item.size === newItem.size,
+      );
+
+      if (!existingItem) {
+        return [
+          ...items,
+          {
+            ...newItem,
+            quantity: Math.min(newItem.quantity, MAX_QUANTITY),
+          },
+        ];
+      }
+
+      return items.map((item) =>
+        item.id === newItem.id && item.size === newItem.size
+          ? {
+              ...item,
+              quantity: Math.min(
+                item.quantity + newItem.quantity,
+                MAX_QUANTITY,
+              ),
+            }
+          : item,
+      );
+    });
+  }, []);
+  const updateQuantity = useCallback(
+    (id: string, size: CartItem["size"], quantity: number) => {
+      setCart((items) =>
+        items.map((item) =>
+          item.id === id && item.size === size
+            ? {
+                ...item,
+                quantity: Math.max(1, Math.min(quantity, MAX_QUANTITY)),
+              }
+            : item,
+        ),
+      );
+    },
+    [],
+  );
+  const removeFromCart = useCallback(
+    (id: string, size: CartItem["size"]) => {
+      setCart((items) =>
+        items.filter((item) => item.id !== id || item.size !== size),
+      );
+    },
+    [],
+  );
+  const actions = useMemo<CartActionsContextType>(
+    () => ({ addToCart, clearCart, updateQuantity, removeFromCart }),
+    [addToCart, clearCart, removeFromCart, updateQuantity],
+  );
+
   useEffect(() => {
     try {
       window.localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
@@ -70,62 +135,13 @@ export function CartProvider({ children }: { children: ReactNode }) {
       cart,
       cartCount,
       cartTotal,
-      clearCart: () => setCart([]),
-      addToCart: (newItem) => {
-        if (
-          !Number.isInteger(newItem.quantity) ||
-          newItem.quantity < 1
-        ) {
-          throw new Error("Cart quantity must be a positive integer");
-        }
-
-        setCart((items) => {
-          const existingItem = items.find(
-            (item) => item.id === newItem.id && item.size === newItem.size,
-          );
-
-          if (!existingItem) {
-            return [
-              ...items,
-              {
-                ...newItem,
-                quantity: Math.min(newItem.quantity, MAX_QUANTITY),
-              },
-            ];
-          }
-
-          return items.map((item) =>
-            item.id === newItem.id && item.size === newItem.size
-              ? {
-                  ...item,
-                  quantity: Math.min(
-                    item.quantity + newItem.quantity,
-                    MAX_QUANTITY,
-                  ),
-                }
-              : item,
-          );
-        });
-      },
-      updateQuantity: (id, size, quantity) => {
-        setCart((items) =>
-          items.map((item) =>
-            item.id === id && item.size === size
-              ? {
-                  ...item,
-                  quantity: Math.max(1, Math.min(quantity, MAX_QUANTITY)),
-                }
-              : item,
-          ),
-        );
-      },
-      removeFromCart: (id, size) => {
-        setCart((items) =>
-          items.filter((item) => item.id !== id || item.size !== size),
-        );
-      },
+      ...actions,
     };
-  }, [cart]);
+  }, [actions, cart]);
 
-  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
+  return (
+    <CartActionsContext.Provider value={actions}>
+      <CartContext.Provider value={value}>{children}</CartContext.Provider>
+    </CartActionsContext.Provider>
+  );
 }

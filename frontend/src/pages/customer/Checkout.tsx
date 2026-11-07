@@ -226,7 +226,7 @@ export default function Checkout() {
           id="checkout-form"
           onSubmit={handleContinue}
           onChange={() => setFormError(null)}
-          className="rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-[0_8px_30px_-25px_rgba(30,51,35,0.5)] sm:p-6"
+          className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-4 shadow-[0_8px_30px_-25px_rgba(30,51,35,0.5)] sm:p-6"
         >
           <div className="mb-5">
             <h2 className="font-serif text-xl font-semibold text-[#253b2a] sm:text-2xl">
@@ -244,7 +244,7 @@ export default function Checkout() {
               <legend className="mb-2 text-sm font-semibold text-[#394b38]">
                 How would you like your order?
               </legend>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
                 {([
                   {
                     value: "TAKEAWAY",
@@ -269,7 +269,7 @@ export default function Checkout() {
                       className="peer sr-only"
                     />
                     <span
-                      className={`flex min-h-[88px] items-center gap-3 rounded-2xl border p-4 transition peer-focus-visible:ring-2 peer-focus-visible:ring-[#b56b36] peer-focus-visible:ring-offset-2 ${
+                      className={`flex min-h-[76px] items-center gap-2 rounded-2xl border p-3 transition peer-focus-visible:ring-2 peer-focus-visible:ring-[#b56b36] peer-focus-visible:ring-offset-2 sm:min-h-[88px] sm:gap-3 sm:p-4 ${
                         orderType === value
                           ? "border-[#31573a] bg-[#f2f7ee]"
                           : "border-[#e5e2d6] bg-[#fdfcf9] hover:border-[#9cae92]"
@@ -463,8 +463,8 @@ export default function Checkout() {
       </div>
 
       <div
-        className="fixed inset-x-0 z-40 border-t border-[#e9e6da] bg-[#fffdf7]/95 px-4 pt-3 shadow-[0_-12px_32px_-24px_rgba(36,49,34,0.65)] backdrop-blur-lg sm:hidden"
-        style={{ bottom: "calc(4.5rem + env(safe-area-inset-bottom))" }}
+        className="mobile-sticky-action fixed inset-x-0 z-40 border-t border-[#e9e6da] bg-[#fffdf7]/95 px-4 pt-3 shadow-[0_-12px_32px_-24px_rgba(36,49,34,0.65)] backdrop-blur-lg sm:hidden"
+        style={{ bottom: "var(--customer-mobile-nav-offset)" }}
       >
         <button
           type="submit"
