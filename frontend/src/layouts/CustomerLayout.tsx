@@ -23,17 +23,17 @@ export default function CustomerLayout() {
 
   return (
     <div className="min-h-screen bg-[#faf9f4] text-[#253b2a]">
-      <header className="sticky top-0 z-50 border-b border-[#e9e6da]/80 bg-[#faf9f4]/95 backdrop-blur-md">
-        <div className="mx-auto flex h-[4.5rem] max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-10">
+      <header className="customer-header sticky top-0 z-50 border-b border-[#e9e6da]/80 bg-[#faf9f4]/95 backdrop-blur-md">
+        <div className="mx-auto flex h-[3.625rem] max-w-7xl items-center justify-between px-4 sm:h-[4.5rem] sm:px-6 lg:px-10">
           <Link
             to="/"
             aria-label="Fruits & Roots home"
             className="inline-flex items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-4"
           >
-            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#31573a] text-[#f9f5e8]">
-              <Leaf size={19} aria-hidden="true" />
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#31573a] text-[#f9f5e8] sm:h-11 sm:w-11">
+              <Leaf size={17} aria-hidden="true" />
             </span>
-            <span className="font-serif text-lg font-semibold tracking-tight text-[#253b2a] sm:text-xl">
+            <span className="font-serif text-base font-semibold tracking-tight text-[#253b2a] sm:text-xl">
               Fruits <span className="text-[#b56b36]">&</span> Roots
             </span>
           </Link>
@@ -67,21 +67,21 @@ export default function CustomerLayout() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-5 pb-28 sm:px-6 sm:py-7 sm:pb-10 lg:px-10">
+      <main className="customer-main mx-auto max-w-7xl px-4 py-4 pb-32 sm:px-6 sm:py-7 sm:pb-10 lg:px-10">
         <Outlet />
       </main>
 
       <nav
         aria-label="Mobile navigation"
-        className="fixed inset-x-0 bottom-0 z-50 border-t border-[#e9e6da] bg-[#fffdf7]/95 px-3 pt-2 shadow-[0_-10px_30px_-24px_rgba(36,49,34,0.6)] backdrop-blur-lg sm:hidden"
-        style={{ paddingBottom: "max(0.65rem, env(safe-area-inset-bottom))" }}
+        className="mobile-bottom-nav fixed inset-x-0 bottom-0 z-50 border-t border-[#e9e6da] bg-[#fffdf7]/95 px-3 pt-1.5 shadow-[0_-10px_30px_-24px_rgba(36,49,34,0.6)] backdrop-blur-lg sm:hidden"
+        style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}
       >
         <div className="mx-auto grid max-w-md grid-cols-4 gap-1">
           <NavLink
             to="/"
             end
             className={({ isActive }) =>
-              `flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] ${
+              `flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] ${
                 isActive ? "text-[#31573a]" : "text-[#7a8074]"
               }`
             }
@@ -92,7 +92,7 @@ export default function CustomerLayout() {
           <NavLink
             to="/menu"
             className={({ isActive }) =>
-              `flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] ${
+              `flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] ${
                 isActive ? "text-[#31573a]" : "text-[#7a8074]"
               }`
             }
@@ -104,7 +104,7 @@ export default function CustomerLayout() {
             href={directionsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-semibold text-[#7a8074] transition hover:text-[#31573a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36]"
+            className="flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold text-[#7a8074] transition hover:text-[#31573a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36]"
           >
             <MapPin size={19} aria-hidden="true" />
             Visit
@@ -113,7 +113,7 @@ export default function CustomerLayout() {
             to="/cart"
             aria-label={`Cart, ${cartCount} ${cartCount === 1 ? "item" : "items"}`}
             className={({ isActive }) =>
-              `relative flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] ${
+              `relative flex min-h-12 flex-col items-center justify-center gap-0.5 rounded-xl text-[10px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] ${
                 isActive ? "text-[#31573a]" : "text-[#7a8074]"
               }`
             }

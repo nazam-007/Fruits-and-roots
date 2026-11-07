@@ -3,6 +3,7 @@ import type { MenuItem } from "../../data/menu";
 import {
   getMenuItemFallbackEmoji,
   getMenuItemImage,
+  getResponsiveImageSources,
 } from "../../data/menuImages";
 
 type Props = {
@@ -12,6 +13,7 @@ type Props = {
   fallbackClassName: string;
   width?: number;
   height?: number;
+  sizes?: string;
   loading?: "eager" | "lazy";
 };
 
@@ -22,6 +24,7 @@ export default function MenuItemImage({
   fallbackClassName,
   width,
   height,
+  sizes,
   loading = "lazy",
 }: Props) {
   const [failedImage, setFailedImage] = useState<string | null>(null);
@@ -38,9 +41,11 @@ export default function MenuItemImage({
   return (
     <img
       src={image}
+      srcSet={getResponsiveImageSources(image)}
       alt={alt}
       width={width}
       height={height}
+      sizes={sizes}
       loading={loading}
       decoding="async"
       onError={() => setFailedImage(image)}

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowLeft,
@@ -25,32 +26,45 @@ export default function Cart() {
     error: menuError,
     refreshMenu,
   } = useMenu();
-  const cartEntries = cart.map((item) => {
-    const product = menuItems.find((menuItem) => menuItem.id === item.id);
-    const variant = product?.variants.find((menuVariant) => menuVariant.size === item.size);
-    const available = product?.available === true && Boolean(variant);
-    return {
-      ...item,
-      product,
-      name: product?.name ?? item.name,
-      price: variant?.price ?? item.price,
-      available,
-      statusLabel: menuLoading || menuError
-        ? null
-        : !product
-        ? "No longer on the menu"
-        : product.availabilityStatus === "SOLD_OUT"
-          ? "Sold out"
-          : product.availabilityStatus === "COMING_SOON" || !product.available
-            ? "Coming soon"
-            : variant
-              ? null
-              : "This size is no longer offered",
-    };
-  });
-  const currentCartTotal = cartEntries.reduce(
-    (total, item) => total + item.price * item.quantity,
-    0,
+  const menuItemsById = useMemo(
+    () => new Map(menuItems.map((item) => [item.id, item])),
+    [menuItems],
+  );
+  const cartEntries = useMemo(
+    () =>
+      cart.map((item) => {
+        const product = menuItemsById.get(item.id);
+        const variant = product?.variants.find(
+          (menuVariant) => menuVariant.size === item.size,
+        );
+        const available = product?.available === true && Boolean(variant);
+        return {
+          ...item,
+          product,
+          name: product?.name ?? item.name,
+          price: variant?.price ?? item.price,
+          available,
+          statusLabel: menuLoading || menuError
+            ? null
+            : !product
+              ? "No longer on the menu"
+              : product.availabilityStatus === "SOLD_OUT"
+                ? "Sold out"
+                : product.availabilityStatus === "COMING_SOON" || !product.available
+                  ? "Coming soon"
+                  : variant
+                    ? null
+                    : "This size is no longer offered",
+        };
+      }),
+    [cart, menuItemsById, menuLoading, menuError],
+  );
+  const currentCartTotal = useMemo(
+    () => cartEntries.reduce(
+      (total, item) => total + item.price * item.quantity,
+      0,
+    ),
+    [cartEntries],
   );
   const cartItemsAreAvailable =
     !menuLoading && !menuError && cartEntries.every((item) => item.available);
@@ -83,7 +97,7 @@ export default function Cart() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl pb-24 sm:pb-0">
+    <div className="cart-page mx-auto max-w-6xl pb-[calc(8rem+env(safe-area-inset-bottom))] sm:pb-0">
       <Link
         to="/menu"
         className="mb-5 inline-flex min-h-11 items-center gap-2 rounded-full pr-3 text-sm font-semibold text-[#596554] transition hover:text-[#31573a] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2"
@@ -94,7 +108,7 @@ export default function Cart() {
         Keep browsing
       </Link>
 
-      <div className="mb-6 flex items-end justify-between gap-3 sm:mb-8">
+      <div className="mb-4 flex items-end justify-between gap-3 sm:mb-8">
         <div>
           <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#b56b36]">
             Your fresh picks
@@ -108,7 +122,7 @@ export default function Cart() {
         </p>
       </div>
 
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-8">
+      <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:gap-8">
         <section
           aria-label="Cart items"
           className="min-w-0 space-y-3 sm:space-y-4"
@@ -167,7 +181,7 @@ export default function Cart() {
                     </button>
                   </div>
 
-                  <div className="mt-3 flex flex-wrap items-end justify-between gap-x-2 gap-y-1">
+                  <div className="mt-3 flex items-center justify-between gap-2">
                     <div
                       role="group"
                       className="inline-flex h-12 items-center rounded-full border border-[#e5e2d6] bg-[#fbfbf7] p-0.5"
@@ -222,7 +236,7 @@ export default function Cart() {
 
         <aside
           aria-labelledby="order-summary-heading"
-          className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-[0_12px_36px_-28px_rgba(30,51,35,0.4)] sm:p-6 lg:sticky lg:top-24"
+          className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-4 shadow-[0_12px_36px_-28px_rgba(30,51,35,0.4)] sm:p-6 lg:sticky lg:top-24"
         >
           <h2
             id="order-summary-heading"
@@ -231,7 +245,7 @@ export default function Cart() {
             Order summary
           </h2>
 
-          <div className="mt-5 space-y-3 border-b border-[#eeece4] pb-5 text-sm">
+          <div className="mt-3 space-y-2 border-b border-[#eeece4] pb-4 text-sm sm:mt-5 sm:space-y-3 sm:pb-5">
             <div className="flex justify-between gap-3 text-[#73796d]">
               <span>Items ({cartCount})</span>
               <span className="font-medium tabular-nums text-[#253b2a]">
@@ -249,7 +263,7 @@ export default function Cart() {
             </div>
           </div>
 
-          <div className="mt-4 flex items-center justify-between gap-3">
+          <div className="mt-3 flex items-center justify-between gap-3 sm:mt-4">
             <span className="font-semibold text-[#253b2a]">Total</span>
             <output
               aria-label="Cart total"
@@ -295,8 +309,8 @@ export default function Cart() {
       </div>
 
       <div
-        className="fixed inset-x-0 z-40 border-t border-[#e9e6da] bg-[#fffdf7]/95 px-4 pt-3 shadow-[0_-12px_32px_-24px_rgba(36,49,34,0.65)] backdrop-blur-lg sm:hidden"
-        style={{ bottom: "calc(4.5rem + env(safe-area-inset-bottom))" }}
+        className="mobile-sticky-action fixed inset-x-0 z-40 border-t border-[#e9e6da] bg-[#fffdf7]/95 px-4 pt-3 shadow-[0_-12px_32px_-24px_rgba(36,49,34,0.65)] backdrop-blur-lg sm:hidden"
+        style={{ bottom: "var(--customer-mobile-nav-offset)" }}
       >
         <button
           type="button"

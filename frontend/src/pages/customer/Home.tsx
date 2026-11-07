@@ -10,7 +10,8 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { categories, getCategorySlug } from "../../data/menu";
-import MenuItemImage from "../../components/customer/MenuItemImage";
+import { getResponsiveImageSources } from "../../data/menuImages";
+import ProductCard from "../../components/customer/ProductCard";
 import { useMenu } from "../../context/MenuContext";
 
 const categoryDetails: Record<
@@ -74,13 +75,17 @@ export default function Home() {
   const featuredItems = menuItems.filter(
     (item) => item.featured && item.available,
   );
+  const heroImage =
+    "https://images.unsplash.com/photo-1546173159-315724a31696?auto=format&fit=crop&w=1800&q=90";
 
   return (
     <>
-      <div className="home-page space-y-20 pb-12 md:space-y-28">
-        <section className="relative isolate flex min-h-[540px] items-center overflow-hidden rounded-[2rem] bg-[#173923] text-white shadow-[0_24px_70px_-36px_rgba(23,57,35,0.75)] sm:min-h-[600px] lg:min-h-[620px]">
+      <div className="home-page space-y-9 pb-8 sm:space-y-14 md:space-y-16">
+        <section className="relative isolate flex min-h-[310px] items-center overflow-hidden rounded-[1.5rem] bg-[#173923] text-white shadow-[0_24px_70px_-36px_rgba(23,57,35,0.75)] sm:min-h-[400px] sm:rounded-[2rem] lg:min-h-[480px]">
           <img
-            src="https://images.unsplash.com/photo-1546173159-315724a31696?auto=format&fit=crop&w=1800&q=90"
+            src={heroImage}
+            srcSet={getResponsiveImageSources(heroImage, [640, 960, 1280, 1800])}
+            sizes="100vw"
             alt="Freshly blended fruit drinks ready to enjoy"
             width="1800"
             height="1200"
@@ -97,22 +102,22 @@ export default function Home() {
             className="absolute inset-0 -z-10 bg-gradient-to-t from-[#102a1b]/35 via-transparent to-[#102a1b]/10"
           />
 
-          <div className="max-w-3xl px-6 py-16 sm:px-10 sm:py-20 lg:px-16 lg:py-24">
-            <p className="mb-7 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-sm font-semibold tracking-wide text-[#f8f3df] backdrop-blur-sm">
+          <div className="max-w-3xl px-5 py-9 sm:px-10 sm:py-14 lg:px-16 lg:py-20">
+            <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold tracking-wide text-[#f8f3df] backdrop-blur-sm sm:mb-6 sm:px-4 sm:py-2 sm:text-sm">
               <Leaf size={16} aria-hidden="true" />
               Pressed fresh, served with love
             </p>
-            <h1 className="max-w-2xl font-serif text-5xl font-semibold leading-[1.04] tracking-[-0.04em] sm:text-6xl lg:text-7xl">
+            <h1 className="max-w-2xl font-serif text-[2.6rem] font-semibold leading-[1.02] tracking-[-0.04em] sm:text-6xl lg:text-7xl">
               Sip the season.
               <span className="mt-1 block text-[#f6a45b]">
                 Taste the roots.
               </span>
             </h1>
-            <p className="mt-6 max-w-xl text-base leading-7 text-white/80 sm:text-lg sm:leading-8">
+            <p className="mt-4 max-w-xl text-sm leading-6 text-white/80 sm:mt-6 sm:text-lg sm:leading-8">
               Fresh juices, fruit bowls, choco waffles and toasties — made
               with care and ordered right from your table.
             </p>
-            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+            <div className="mt-6 flex flex-col gap-2.5 sm:mt-8 sm:flex-row sm:gap-3">
               <Link
                 to="/menu"
                 className="group inline-flex min-h-12 items-center justify-center gap-3 rounded-full bg-[#f6a45b] px-6 py-3 font-semibold text-[#233b27] shadow-lg shadow-black/10 transition duration-200 hover:-translate-y-0.5 hover:bg-[#ffb36f] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#173923]"
@@ -170,10 +175,12 @@ export default function Home() {
                 <Link
                   key={category}
                   to={`/menu?category=${getCategorySlug(category)}`}
-                  className="group relative isolate flex min-h-52 items-end overflow-hidden rounded-2xl bg-[#31573a] shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-4 sm:min-h-64 sm:rounded-3xl"
+                  className="group relative isolate flex min-h-36 items-end overflow-hidden rounded-2xl bg-[#31573a] shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-4 sm:min-h-56 sm:rounded-3xl"
                 >
                   <img
                     src={details.image}
+                    srcSet={getResponsiveImageSources(details.image)}
+                    sizes="(min-width: 1024px) 25vw, 50vw"
                     alt=""
                     width="1000"
                     height="1200"
@@ -185,14 +192,14 @@ export default function Home() {
                     aria-hidden="true"
                     className={`absolute inset-0 -z-10 bg-gradient-to-t ${details.accent}`}
                   />
-                  <div className="p-4 text-white sm:p-6">
-                    <h3 className="font-serif text-xl font-semibold leading-tight sm:text-2xl">
+                  <div className="p-3 text-white sm:p-6">
+                    <h3 className="font-serif text-lg font-semibold leading-tight sm:text-2xl">
                       {category}
                     </h3>
-                    <p className="mt-1.5 text-xs leading-5 text-white/80 sm:text-sm">
+                    <p className="mt-1 text-[11px] leading-4 text-white/80 sm:mt-1.5 sm:text-sm sm:leading-5">
                       {details.description}
                     </p>
-                    <span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-[#ffd3a8] transition group-hover:gap-2">
+                    <span className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#ffd3a8] transition group-hover:gap-2 sm:mt-4">
                       Explore
                       <ArrowRight size={14} aria-hidden="true" />
                     </span>
@@ -204,21 +211,21 @@ export default function Home() {
         </section>
 
         <section aria-labelledby="featured-heading">
-          <div className="mb-7 flex items-end justify-between gap-4">
+          <div className="mb-4 flex items-center justify-between gap-2 sm:mb-7 sm:items-end sm:gap-4">
             <div>
-              <p className="mb-2 text-sm font-semibold uppercase tracking-[0.16em] text-[#b56b36]">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[#b56b36] sm:mb-2 sm:text-sm sm:tracking-[0.16em]">
                 Crowd favorites
               </p>
               <h2
                 id="featured-heading"
-                className="font-serif text-3xl font-semibold tracking-tight text-[#253b2a] sm:text-4xl"
+                className="whitespace-nowrap font-serif text-[clamp(1.25rem,5.8vw,2rem)] font-semibold leading-tight tracking-tight text-[#253b2a] sm:text-4xl"
               >
                 A few good picks
               </h2>
             </div>
             <Link
               to="/menu"
-              className="inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-sm font-semibold text-[#31573a] transition hover:bg-[#edf1e6] hover:text-[#b56b36] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36]"
+              className="inline-flex min-h-11 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-xs font-semibold text-[#31573a] transition-colors duration-150 hover:bg-[#edf1e6] hover:text-[#b56b36] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] sm:gap-1.5 sm:px-3 sm:text-sm"
             >
               See all
               <ArrowUpRight size={16} aria-hidden="true" />
@@ -248,49 +255,13 @@ export default function Home() {
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-3 sm:gap-5 lg:grid-cols-4">
-              {featuredItems.map((item) => {
-              const startingPrice = item.variants.length
-                ? Math.min(...item.variants.map((variant) => variant.price))
-                : null;
-              return (
-                <Link
-                  key={item.id}
-                  to={`/product/${item.id}`}
-                  aria-label={`${item.name}, from ₹${startingPrice ?? "price unavailable"}`}
-                  className="group overflow-hidden rounded-2xl border border-[#e7e4d8] bg-white shadow-[0_8px_26px_-20px_rgba(30,51,35,0.55)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_18px_38px_-20px_rgba(30,51,35,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-4 sm:rounded-3xl"
-                >
-                  <div className="relative aspect-[4/3] overflow-hidden bg-[#e8eddf]">
-                    <MenuItemImage
-                      item={item}
-                      width={900}
-                      height={675}
-                      imageClassName="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-105"
-                      fallbackClassName="absolute inset-0 flex items-center justify-center text-5xl text-[#31573a]"
-                    />
-                    <span className="absolute left-3 top-3 max-w-[calc(100%-1.5rem)] truncate rounded-full bg-[#fff7e9]/95 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#8d562e] shadow-sm sm:text-xs">
-                      {item.tags?.[0] ?? "House favorite"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 p-3.5 sm:p-5">
-                    <div className="min-w-0">
-                      <h3 className="truncate font-semibold text-[#253b2a] sm:text-lg">
-                        {item.name}
-                      </h3>
-                      <p className="mt-1 text-sm text-[#6d7468]">
-                        From{" "}
-                        <span className="font-semibold text-[#31573a]">
-                          {startingPrice !== null ? `₹${startingPrice}` : "—"}
-                        </span>
-                      </p>
-                    </div>
-                    <span
-                      aria-hidden="true"
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#edf1e6] text-[#31573a] transition group-hover:bg-[#31573a] group-hover:text-white"
-                    >
-                      <ArrowRight size={17} />
-                    </span>
-                  </div>
-                </Link>
+              {featuredItems.map((item, index) => {
+                return (
+                  <ProductCard
+                    key={item.id}
+                    item={item}
+                    imageLoading={index < 2 ? "eager" : "lazy"}
+                  />
                 );
               })}
             </div>
