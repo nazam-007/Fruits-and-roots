@@ -62,6 +62,7 @@ const customerMenu = [
     featured: false,
     available: true,
     availabilityStatus: "AVAILABLE",
+    tags: ["Seasonal Recommendation With A Long Mobile Badge"],
     variants: [
       { size: "Regular", price: 250 },
       { size: "Large", price: 350 },
@@ -76,6 +77,7 @@ const customerMenu = [
     featured: false,
     available: true,
     availabilityStatus: "AVAILABLE",
+    tags: ["Most Loved"],
     variants: [{ size: "Regular", price: 250 }],
   },
 ];
@@ -102,6 +104,8 @@ async function mockAdminReadApis(context: BrowserContext) {
 
     if (path.endsWith("/auth/session")) {
       body = { adminId: "responsive-test-admin" };
+    } else if (path.endsWith("/tags")) {
+      body = [];
     } else if (path.endsWith("/dashboard")) {
       body = {
         summary: {
@@ -243,6 +247,26 @@ async function expectNoHorizontalOverflow(page: Page, route: string) {
     `${route} overflows horizontally: ${JSON.stringify(measurement)}`,
   ).toBeLessThanOrEqual(measurement.clientWidth + 1);
 }
+
+test("dynamic product tags remain visible without mobile overflow", async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 320, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  await mockAdminReadApis(context);
+  const page = await context.newPage();
+
+  await page.goto("/menu");
+  await expect(page.getByText("Seasonal Recommendation With A Long Mobile Badge")).toBeVisible();
+  await expectNoHorizontalOverflow(page, "/menu with product tags at 320px");
+
+  await page.goto("/product/responsive-test-product");
+  await expect(page.getByText("Seasonal Recommendation With A Long Mobile Badge")).toBeVisible();
+  await expectNoHorizontalOverflow(page, "/product with product tags at 320px");
+
+  await context.close();
+});
 
 for (const viewport of viewports) {
   test(`all customer and admin routes fit at ${viewport.width}px`, async ({ browser }, testInfo) => {

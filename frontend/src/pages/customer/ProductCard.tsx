@@ -24,6 +24,7 @@ export default function ProductCard({
     item.available && item.variants.length > 0;
 
   const productImage = item.image?.trim();
+  const primaryTag = item.tags?.[0] ?? (item.featured ? "Popular" : null);
 
   return (
     <article className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-green-100 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
@@ -55,10 +56,10 @@ export default function ProductCard({
         )}
 
         {/* Featured badge */}
-        {item.featured && isAvailable && (
+        {primaryTag && isAvailable && (
           <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-3 py-1.5 text-xs font-semibold text-[#354632] shadow-sm">
-            <Leaf size={13} />
-            Popular
+            {item.featured && !item.tags?.length && <Leaf size={13} />}
+            {primaryTag}
           </span>
         )}
 

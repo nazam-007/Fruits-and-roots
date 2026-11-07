@@ -10,6 +10,7 @@ import {
   Plus,
   Search,
   Star,
+  Tag,
   Trash2,
   Undo2,
 } from "lucide-react";
@@ -30,9 +31,14 @@ import {
   updateAdminMenuStatus,
   updateAdminCategory,
   uploadAdminMenuImage,
+  createAdminTag,
+  deleteAdminTag,
+  fetchAdminTags,
+  updateAdminTag,
   type AdminMenuProduct,
   type AdminMenuProductInput,
   type AdminCategory,
+  type AdminMenuTag,
 } from "../../services/adminApi";
 
 type Status = AdminMenuProduct["availabilityStatus"];
@@ -45,6 +51,7 @@ const emptyForm: FormState = {
   image: null,
   availabilityStatus: "AVAILABLE",
   featured: false,
+  tagIds: [],
   regularPrice: 0,
   largePrice: null,
 };
@@ -85,6 +92,7 @@ function productInput(product: AdminMenuProduct): FormState {
     image: product.image,
     availabilityStatus: product.availabilityStatus,
     featured: product.featured,
+    tagIds: product.tags.map((tag) => tag.id),
     regularPrice: product.variants.find((variant) => variant.size === "Regular")?.price ?? 0,
     largePrice: product.variants.find((variant) => variant.size === "Large")?.price ?? null,
   };
@@ -94,6 +102,7 @@ export default function MenuManagement() {
   const { refreshMenu } = useMenu();
   const [products, setProducts] = useState<AdminMenuProduct[]>([]);
   const [categories, setCategories] = useState<AdminCategory[]>([]);
+  const [tags, setTags] = useState<AdminMenuTag[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -110,6 +119,13 @@ export default function MenuManagement() {
   const [editingCategory, setEditingCategory] = useState<AdminCategory | null>(null);
   const [categoryBusy, setCategoryBusy] = useState(false);
   const [categoriesExpanded, setCategoriesExpanded] = useState(false);
+  const [tagsExpanded, setTagsExpanded] = useState(false);
+  const [tagDialogMode, setTagDialogMode] = useState<"create" | "rename" | null>(null);
+  const [tagName, setTagName] = useState("");
+  const [tagSaving, setTagSaving] = useState(false);
+  const [tagError, setTagError] = useState<string | null>(null);
+  const [tagBusy, setTagBusy] = useState(false);
+  const [editingTag, setEditingTag] = useState<AdminMenuTag | null>(null);
   const [editing, setEditing] = useState<AdminMenuProduct | null>(null);
   const [deletingProduct, setDeletingProduct] = useState<AdminMenuProduct | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -120,6 +136,26 @@ export default function MenuManagement() {
   const [saving, setSaving] = useState(false);
   const [busyProductId, setBusyProductId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const noticeTimeout = useRef<number | null>(null);
+
+  const clearNotice = () => {
+    if (noticeTimeout.current !== null) {
+      window.clearTimeout(noticeTimeout.current);
+      noticeTimeout.current = null;
+    }
+    setNotice(null);
+  };
+
+  const showNotice = (message: string) => {
+    if (noticeTimeout.current !== null) {
+      window.clearTimeout(noticeTimeout.current);
+    }
+    setNotice(message);
+    noticeTimeout.current = window.setTimeout(() => {
+      setNotice(null);
+      noticeTimeout.current = null;
+    }, 5000);
+  };
 
   const loadProducts = useCallback(async (includeArchived: boolean) => {
     setLoading(true);
@@ -139,6 +175,9 @@ export default function MenuManagement() {
       void fetchAdminCategories()
         .then(setCategories)
         .catch((loadError: unknown) => setError(requestMessage(loadError)));
+      void fetchAdminTags()
+        .then(setTags)
+        .catch((loadError: unknown) => setError(requestMessage(loadError)));
     }, 0);
     return () => window.clearTimeout(initialLoad);
   }, [loadProducts]);
@@ -148,6 +187,14 @@ export default function MenuManagement() {
       if (imagePreview) URL.revokeObjectURL(imagePreview);
     };
   }, [imagePreview]);
+
+  useEffect(() => {
+    return () => {
+      if (noticeTimeout.current !== null) {
+        window.clearTimeout(noticeTimeout.current);
+      }
+    };
+  }, []);
 
   const categoryNames = useMemo(
     () => categories.map((category) => category.name),
@@ -177,7 +224,7 @@ export default function MenuManagement() {
     setImageFile(null);
     setImagePreview(null);
     setError(null);
-    setNotice(null);
+    clearNotice();
     setEditorOpen(true);
   };
 
@@ -204,7 +251,7 @@ export default function MenuManagement() {
       setCategoryName("");
       setCategoryDialogMode(null);
       setCreateCategoryForForm(false);
-      setNotice(`Category "${created.name}" created.`);
+      showNotice(`Category "${created.name}" created.`);
     } catch (createError) {
       setCategoryError(requestMessage(createError));
     } finally {
@@ -261,7 +308,7 @@ export default function MenuManagement() {
       );
       setCategoryDialogMode(null);
       setEditingCategory(null);
-      setNotice(`Category renamed to "${updated.name}".`);
+      showNotice(`Category renamed to "${updated.name}".`);
       await refreshMenu(true);
     } catch (renameError) {
       setCategoryError(requestMessage(renameError));
@@ -285,7 +332,7 @@ export default function MenuManagement() {
         reordered.map((category) => category.id),
       );
       setCategories(updated);
-      setNotice("Category order saved.");
+      showNotice("Category order saved.");
       await refreshMenu(true);
     } catch (reorderError) {
       setError(requestMessage(reorderError));
@@ -318,12 +365,92 @@ export default function MenuManagement() {
           ? { ...current, category: remaining[0]?.name ?? "" }
           : current,
       );
-      setNotice(`Category "${category.name}" deleted.`);
+      showNotice(`Category "${category.name}" deleted.`);
       await refreshMenu(true);
     } catch (deleteError) {
       setError(requestMessage(deleteError));
     } finally {
       setCategoryBusy(false);
+    }
+  };
+
+  const openTagDialog = (mode: "create" | "rename", tag?: AdminMenuTag) => {
+    setEditingTag(tag ?? null);
+    setTagName(tag?.name ?? "");
+    setTagError(null);
+    setTagDialogMode(mode);
+  };
+
+  const handleSaveTag = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = tagName.trim();
+    if (!name) {
+      setTagError("Enter a product tag.");
+      return;
+    }
+    setTagSaving(true);
+    setTagError(null);
+    try {
+      if (tagDialogMode === "rename" && editingTag) {
+        const updated = await updateAdminTag(editingTag.id, name);
+        setTags((current) =>
+          current
+            .map((tag) => tag.id === updated.id ? updated : tag)
+            .sort((left, right) => left.name.localeCompare(right.name)),
+        );
+        setProducts((current) => current.map((product) => ({
+          ...product,
+          tags: product.tags.map((tag) =>
+            tag.id === updated.id ? { ...tag, name: updated.name } : tag,
+          ),
+        })));
+        showNotice(`Tag renamed to "${updated.name}".`);
+        await refreshMenu(true);
+      } else {
+        const created = await createAdminTag(name);
+        setTags((current) =>
+          [...current, created].sort((left, right) =>
+            left.name.localeCompare(right.name),
+          ),
+        );
+        setTagsExpanded(true);
+        showNotice(`Tag "${created.name}" created.`);
+      }
+      setTagDialogMode(null);
+      setEditingTag(null);
+      setTagName("");
+    } catch (saveError) {
+      setTagError(requestMessage(saveError));
+    } finally {
+      setTagSaving(false);
+    }
+  };
+
+  const removeTag = async (tag: AdminMenuTag) => {
+    if (tagBusy) return;
+    const confirmation = tag.productCount > 0
+      ? `Delete "${tag.name}" from ${tag.productCount} ${tag.productCount === 1 ? "product" : "products"}? Only the tag assignment will be removed; products will remain unchanged.`
+      : `Delete unused tag "${tag.name}"?`;
+    if (!window.confirm(confirmation)) return;
+    setTagBusy(true);
+    setError(null);
+    try {
+      await deleteAdminTag(tag.id, tag.productCount > 0);
+      setTags((current) => current.filter((item) => item.id !== tag.id));
+      setProducts((current) => current.map((product) => ({
+        ...product,
+        tags: product.tags.filter((assignedTag) => assignedTag.id !== tag.id),
+      })));
+      setForm((current) => ({
+        ...current,
+        tagIds: current.tagIds.filter((id) => id !== tag.id),
+      }));
+      showNotice(`Tag "${tag.name}" deleted.`);
+      await refreshMenu(true);
+    } catch (deleteError) {
+      setError(requestMessage(deleteError));
+    } finally {
+      setTagBusy(false);
     }
   };
 
@@ -338,7 +465,7 @@ export default function MenuManagement() {
     setImageFile(null);
     setImagePreview(null);
     setError(null);
-    setNotice(null);
+    clearNotice();
     setEditorOpen(true);
   };
 
@@ -384,11 +511,14 @@ export default function MenuManagement() {
       if (imageFile) {
         await uploadAdminMenuImage(productId, await readDataUrl(imageFile));
       }
-      setNotice(editing ? "Product changes saved." : "Product added to the menu.");
+      showNotice(editing ? "Product changes saved." : "Product added to the menu.");
       setEditorOpen(false);
       setImageFile(null);
       setImagePreview(null);
       await loadProducts(showArchived);
+      void fetchAdminTags()
+        .then(setTags)
+        .catch((loadError: unknown) => setError(requestMessage(loadError)));
       await refreshMenu();
     } catch (saveError) {
       const message = requestMessage(saveError);
@@ -412,7 +542,7 @@ export default function MenuManagement() {
       setProducts((current) => current
         .map((item) => item.id === product.id ? updated : item)
         .filter((item) => showArchived || !item.archived));
-      setNotice(`${product.name} is now ${statusLabels[availabilityStatus].toLowerCase()}.`);
+      showNotice(`${product.name} is now ${statusLabels[availabilityStatus].toLowerCase()}.`);
       await refreshMenu();
     } catch (statusError) {
       const message = requestMessage(statusError);
@@ -433,7 +563,7 @@ export default function MenuManagement() {
       setProducts((current) => current
         .map((item) => item.id === product.id ? updated : item)
         .filter((item) => showArchived || !item.archived));
-      setNotice(archived ? `${product.name} archived.` : `${product.name} restored.`);
+      showNotice(archived ? `${product.name} archived.` : `${product.name} restored.`);
       await refreshMenu();
     } catch (archiveError) {
       const message = requestMessage(archiveError);
@@ -460,7 +590,7 @@ export default function MenuManagement() {
           : updated.filter((item) => item.id !== product.id);
       });
       setDeletingProduct(null);
-      setNotice(result.message);
+      showNotice(result.message);
       await refreshMenu(true);
     } catch (deleteError) {
       setError(requestMessage(deleteError));
@@ -575,6 +705,88 @@ export default function MenuManagement() {
         </ol>
       </section>
 
+      <section
+        aria-labelledby="tag-management-title"
+        className="rounded-2xl border border-[#e7e4d8] bg-white p-4 shadow-sm sm:p-5"
+      >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 id="tag-management-title" className="font-semibold text-[#354632]">
+              Product Tags
+            </h2>
+            <p className="mt-1 text-xs text-gray-500">
+              Create and rename reusable badges, then assign them to one or more products.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => openTagDialog("create")}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-[#354632] px-3 text-sm font-semibold text-white hover:bg-[#263524]"
+            >
+              <Plus size={16} aria-hidden="true" />
+              Add Tag
+            </button>
+            <button
+              type="button"
+              aria-label={`${tagsExpanded ? "Collapse" : "Expand"} product tags`}
+              aria-expanded={tagsExpanded}
+              aria-controls="admin-tag-list"
+              onClick={() => setTagsExpanded((expanded) => !expanded)}
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-[#354632] hover:bg-[#f3f5ef]"
+            >
+              {tags.length} {tags.length === 1 ? "tag" : "tags"}
+              {tagsExpanded
+                ? <ChevronUp size={16} aria-hidden="true" />
+                : <ChevronDown size={16} aria-hidden="true" />}
+            </button>
+          </div>
+        </div>
+        <ul id="admin-tag-list" hidden={!tagsExpanded} className="space-y-2">
+          {tags.map((tag) => (
+            <li
+              key={tag.id}
+              className="flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-100 p-2.5 sm:flex-nowrap"
+            >
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-[#fff7e9] px-3 py-1 text-sm font-semibold text-[#8d562e]">
+                  <Tag size={14} aria-hidden="true" />
+                  {tag.name}
+                </span>
+                <span className="shrink-0 text-xs text-gray-500">
+                  {tag.productCount} {tag.productCount === 1 ? "product" : "products"}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={tagBusy}
+                  onClick={() => openTagDialog("rename", tag)}
+                  className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-gray-200 px-2.5 text-xs font-semibold text-[#354632] hover:bg-[#f3f5ef] disabled:opacity-40"
+                >
+                  <Pencil size={14} aria-hidden="true" />
+                  Rename
+                </button>
+                <button
+                  type="button"
+                  disabled={tagBusy}
+                  onClick={() => void removeTag(tag)}
+                  className="inline-flex min-h-10 items-center gap-1 rounded-lg border border-red-100 px-2.5 text-xs font-semibold text-red-800 hover:bg-red-50 disabled:opacity-40"
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Delete
+                </button>
+              </div>
+            </li>
+          ))}
+          {tags.length === 0 && (
+            <li className="rounded-xl border border-dashed border-gray-200 p-4 text-sm text-gray-500">
+              No product tags yet. Add one to make it available in product forms.
+            </li>
+          )}
+        </ul>
+      </section>
+
       {categoryDialogMode && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4 sm:p-5"
@@ -654,6 +866,75 @@ export default function MenuManagement() {
               {categorySaving
                 ? categoryDialogMode === "rename" ? "Saving name..." : "Creating category..."
                 : categoryDialogMode === "rename" ? "Save Name" : "Create Category"}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {tagDialogMode && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4 sm:p-5"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !tagSaving) {
+              setTagDialogMode(null);
+              setEditingTag(null);
+            }
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tag-dialog-title"
+            onSubmit={(event) => void handleSaveTag(event)}
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-md space-y-5 overflow-y-auto rounded-2xl border border-[#e7e4d8] bg-white p-5 shadow-2xl sm:p-6"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="tag-dialog-title" className="text-xl font-bold text-[#354632]">
+                  {tagDialogMode === "rename" ? "Rename Product Tag" : "Create Product Tag"}
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Renaming keeps the tag assigned to its current products.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={tagSaving}
+                onClick={() => {
+                  setTagDialogMode(null);
+                  setEditingTag(null);
+                }}
+                className="min-h-10 shrink-0 rounded-lg border border-gray-200 px-3 text-sm font-semibold text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+              >
+                Close
+              </button>
+            </div>
+            <label className="block text-sm font-semibold text-gray-700">
+              Tag name *
+              <input
+                autoFocus
+                required
+                maxLength={50}
+                value={tagName}
+                onChange={(event) => setTagName(event.target.value)}
+                className="mt-2 block min-h-12 w-full rounded-xl border border-gray-300 bg-white px-3 text-base font-normal text-[#253b2a] shadow-sm outline-none transition focus:border-[#354632] focus:ring-4 focus:ring-[#edf1e6]"
+              />
+            </label>
+            {tagError && (
+              <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+                {tagError}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={tagSaving}
+              className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#354632] px-4 font-semibold text-white shadow-sm transition hover:bg-[#263524] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {tagSaving && <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />}
+              {tagSaving
+                ? "Saving tag..."
+                : tagDialogMode === "rename" ? "Save Name" : "Create Tag"}
             </button>
           </form>
         </div>
@@ -845,6 +1126,47 @@ export default function MenuManagement() {
                 <input type="checkbox" checked={form.featured} onChange={(event) => updateForm("featured", event.target.checked)} className="h-4 w-4 accent-[#354632]" />
                 Feature this item on the menu
               </label>
+              <fieldset className="space-y-2 sm:col-span-2">
+                <legend className="text-sm font-medium text-gray-700">Product Tags (optional)</legend>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-gray-500">Choose one or more badges for this product.</p>
+                  <button
+                    type="button"
+                    onClick={() => openTagDialog("create")}
+                    className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-[#354632] px-2.5 text-xs font-semibold text-[#354632] hover:bg-[#f3f5ef]"
+                  >
+                    <Plus size={14} aria-hidden="true" />
+                    Create tag
+                  </button>
+                </div>
+                {tags.length > 0 ? (
+                  <div className="grid gap-2 rounded-xl border border-gray-200 p-3 sm:grid-cols-2">
+                    {tags.map((tag) => (
+                      <label
+                        key={tag.id}
+                        className="flex min-h-10 items-center gap-2 rounded-lg px-2 text-sm text-gray-700 hover:bg-[#f7f8f4]"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={form.tagIds.includes(tag.id)}
+                          onChange={(event) => {
+                            const selected = new Set(form.tagIds);
+                            if (event.target.checked) selected.add(tag.id);
+                            else selected.delete(tag.id);
+                            updateForm("tagIds", [...selected]);
+                          }}
+                          className="h-4 w-4 accent-[#354632]"
+                        />
+                        <span className="min-w-0 flex-1 truncate">{tag.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-xl border border-dashed border-gray-200 p-3 text-sm text-gray-500">
+                    No tags are available yet. Create one to assign it to this product.
+                  </p>
+                )}
+              </fieldset>
               <div className="space-y-2 sm:col-span-2">
                 <label className="block text-sm font-medium text-gray-700">Product image (JPEG, PNG, or WebP; up to 4 MB)</label>
                 {(imagePreview || form.image) && <img src={imagePreview ?? form.image ?? undefined} alt="Product preview" className="h-36 w-full rounded-xl bg-[#e9eddf] object-cover" />}

@@ -9,6 +9,12 @@ type Props = {
 };
 
 export default function ProductCard({ item }: Props) {
+  const assignedTags = item.tags ?? [];
+  const additionalTags = assignedTags.filter(
+    (tag) => !item.featured || tag.toLowerCase() !== "featured",
+  );
+  const visibleTags = additionalTags.slice(0, 2);
+  const hasBadges = item.featured || visibleTags.length > 0;
   const startingPrice = item.variants.length
     ? Math.min(...item.variants.map((v) => v.price))
     : null;
@@ -33,10 +39,24 @@ export default function ProductCard({ item }: Props) {
           imageClassName="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-105"
           fallbackClassName="absolute inset-0 flex items-center justify-center text-5xl text-[#31573a]"
         />
-        <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
+        {hasBadges && (
+        <div className="absolute left-3 top-3 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-1.5">
           {item.featured && (
             <span className="rounded-full bg-[#fff7e9]/95 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[#8d562e] shadow-sm sm:text-[11px]">
               Featured
+            </span>
+          )}
+          {visibleTags.map((tag) => (
+            <span
+              key={tag}
+              className="max-w-full truncate rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-bold tracking-wide text-[#354632] shadow-sm sm:text-[11px]"
+            >
+              {tag}
+            </span>
+          ))}
+          {additionalTags.length > visibleTags.length && (
+            <span className="rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-bold text-[#354632] shadow-sm sm:text-[11px]">
+              +{additionalTags.length - visibleTags.length}
             </span>
           )}
           {!item.available && (
@@ -45,6 +65,7 @@ export default function ProductCard({ item }: Props) {
             </span>
           )}
         </div>
+        )}
       </div>
 
       <div className="flex min-h-[104px] items-center justify-between gap-2 p-3.5 sm:min-h-[116px] sm:p-5">
