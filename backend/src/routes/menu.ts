@@ -1,7 +1,14 @@
 
 import { Router } from "express";
 import { db } from "../db";
-import { subscribeToCatalogChanges } from "../catalogEvents";
+import {
+  subscribeToCatalogChanges,
+  subscribeToRestaurantStatusChanges,
+} from "../catalogEvents";
+import {
+  getRestaurantAvailability,
+  openingHoursSchema,
+} from "../restaurantSchedule";
 
 const router = Router();
 
@@ -22,6 +29,7 @@ router.get("/events", (_req, res) => {
     closed = true;
     clearInterval(keepAlive);
     unsubscribe();
+    unsubscribeRestaurantStatus();
   };
   const sendChange = () => {
     if (closed) return;
@@ -32,6 +40,14 @@ router.get("/events", (_req, res) => {
     }
   };
   const unsubscribe = subscribeToCatalogChanges(sendChange);
+  const unsubscribeRestaurantStatus = subscribeToRestaurantStatusChanges(() => {
+    if (closed) return;
+    try {
+      res.write("event: restaurant-status-changed\ndata: {}\n\n");
+    } catch {
+      cleanup();
+    }
+  });
   const keepAlive = setInterval(() => {
     if (closed) return;
     try {
@@ -43,6 +59,47 @@ router.get("/events", (_req, res) => {
 
   res.on("close", cleanup);
   res.on("error", cleanup);
+});
+
+router.get("/status", async (_req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT accepting_orders AS "acceptingOrders",
+              opening_hours AS "openingHours",
+              updated_at AS "updatedAt"
+       FROM public.restaurant_settings
+       WHERE id = 1`,
+    );
+    if (!result.rows[0]) {
+      res.status(503).json({
+        code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+        message: "Restaurant ordering status is unavailable.",
+      });
+      return;
+    }
+    const settings = result.rows[0];
+    const schedule = openingHoursSchema.safeParse(settings.openingHours);
+    if (!schedule.success) {
+      res.status(503).json({
+        code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+        message: "Restaurant opening hours are unavailable.",
+      });
+      return;
+    }
+    res.json({
+      ...settings,
+      openingHours: schedule.data,
+      ...getRestaurantAvailability(settings.acceptingOrders, schedule.data),
+    });
+  } catch (error) {
+    console.error("Restaurant ordering status lookup failed", {
+      code: (error as { code?: string }).code,
+    });
+    res.status(503).json({
+      code: "RESTAURANT_SETTINGS_UNAVAILABLE",
+      message: "Restaurant ordering status is unavailable.",
+    });
+  }
 });
 
 router.get("/", async (_req, res) => {

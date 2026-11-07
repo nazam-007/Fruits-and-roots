@@ -6,7 +6,15 @@ import ProductCard from "../../components/customer/ProductCard";
 import { useMenu } from "../../context/MenuContext";
 
 export default function Menu() {
-  const { menuItems, loading, error, refreshMenu } = useMenu();
+  const {
+    menuItems,
+    loading,
+    error,
+    refreshMenu,
+    restaurantStatus,
+    restaurantStatusLoading,
+    restaurantStatusError,
+  } = useMenu();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -29,6 +37,20 @@ export default function Menu() {
     },
     [menuItems],
   );
+  const acceptingOrders =
+    restaurantStatus?.orderingAvailable === true && !restaurantStatusError;
+  const ordersPaused =
+    restaurantStatus?.status === "PAUSED" && !restaurantStatusError;
+  const ordersClosed =
+    restaurantStatus?.status === "CLOSED" && !restaurantStatusError;
+  const nextOpening = restaurantStatus?.nextOpenAt
+    ? new Intl.DateTimeFormat("en-IN", {
+      timeZone: "Asia/Kolkata",
+      weekday: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(restaurantStatus.nextOpenAt))
+    : null;
   const selectedCategoryId =
     activeCategoryId !== null &&
     menuCategories.some((category) => category.id === activeCategoryId)
@@ -65,6 +87,45 @@ export default function Menu() {
           indulgent desserts, and satisfying bites.
         </p>
       </section>
+
+      <div
+        role="status"
+        aria-live="polite"
+        className={`mx-auto inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold ${
+          acceptingOrders
+            ? "border-green-200 bg-green-50 text-green-900"
+            : ordersPaused
+              ? "border-amber-200 bg-amber-50 text-amber-900"
+              : "border-gray-200 bg-white text-gray-600"
+        }`}
+      >
+        <span
+          aria-hidden="true"
+          className={`h-2 w-2 rounded-full ${
+            acceptingOrders
+              ? "bg-green-600"
+              : ordersPaused
+                ? "bg-amber-600"
+                : "bg-gray-400"
+          }`}
+        />
+        {restaurantStatusError
+          ? "Order availability is temporarily unavailable"
+          : restaurantStatusLoading && !restaurantStatus
+          ? "Checking order availability..."
+          : acceptingOrders
+            ? "Open Now"
+            : ordersClosed
+              ? "Closed Now"
+              : ordersPaused
+                ? "Temporarily Not Accepting Orders"
+                : "Order availability is temporarily unavailable"}
+      </div>
+      {ordersClosed && nextOpening && (
+        <p className="mx-auto -mt-5 text-center text-sm text-gray-600">
+          Opens next: {nextOpening} IST
+        </p>
+      )}
 
       {/* Search */}
       <div className="relative mx-auto max-w-2xl">

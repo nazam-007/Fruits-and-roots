@@ -53,6 +53,9 @@ export default function Checkout() {
     loading: menuLoading,
     error: menuError,
     refreshMenu,
+    restaurantStatus,
+    restaurantStatusLoading,
+    restaurantStatusError,
   } = useMenu();
   const [customerName, setCustomerName] = useState(
     checkoutDetails?.customerName ?? "",
@@ -77,6 +80,8 @@ export default function Checkout() {
   });
   const cartItemsAreAvailable =
     !menuLoading && !menuError && cart.length > 0 && checkoutItems.every((item) => item.available);
+  const orderingEnabled =
+    restaurantStatus?.orderingAvailable === true && !restaurantStatusError;
   const currentCartTotal = checkoutItems.reduce(
     (total, item) => total + item.price * item.quantity,
     0,
@@ -111,6 +116,16 @@ export default function Checkout() {
     }
     if (!cart.length) {
       navigate("/cart", { replace: true });
+      return;
+    }
+    if (!orderingEnabled) {
+      setFormError(
+        restaurantStatus?.status === "PAUSED"
+          ? "The restaurant is temporarily not accepting orders. Your cart is saved; please try again later."
+          : restaurantStatus?.status === "CLOSED"
+            ? "The restaurant is currently closed. Your cart is saved; please try again during opening hours."
+          : "Unable to verify whether the restaurant is accepting orders. Please try again.",
+      );
       return;
     }
     if (!cartItemsAreAvailable) {
@@ -330,7 +345,13 @@ export default function Checkout() {
 
           <button
             type="submit"
-            disabled={menuLoading || !cartItemsAreAvailable || submitting}
+            disabled={
+              menuLoading ||
+              restaurantStatusLoading ||
+              !orderingEnabled ||
+              !cartItemsAreAvailable ||
+              submitting
+            }
             className="mt-6 hidden min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#31573a] px-6 py-3 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-[#25472e] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2 sm:inline-flex"
           >
             {submitting ? "Creating your order..." : "Continue to Payment"}
@@ -352,6 +373,26 @@ export default function Checkout() {
           {!menuLoading && !menuError && cart.length > 0 && !cartItemsAreAvailable && (
             <p role="alert" className="mt-3 text-sm text-[#984734]">
               One or more cart items are unavailable. Please review your cart.
+            </p>
+          )}
+          {restaurantStatus?.status === "PAUSED" && (
+            <p role="alert" className="mt-3 text-sm text-[#984734]">
+              The restaurant is temporarily not accepting orders. Your cart is saved.
+            </p>
+          )}
+          {restaurantStatus?.status === "CLOSED" && (
+            <p role="alert" className="mt-3 text-sm text-[#984734]">
+              The restaurant is currently closed. Your cart is saved. Please try again during opening hours.
+            </p>
+          )}
+          {restaurantStatusError && (
+            <p role="alert" className="mt-3 text-sm text-[#984734]">
+              Unable to verify restaurant ordering status. Checkout is disabled until the status can be confirmed.
+            </p>
+          )}
+          {restaurantStatusLoading && !restaurantStatus && (
+            <p role="status" className="mt-3 text-sm text-[#73796d]">
+              Checking whether the restaurant is accepting orders...
             </p>
           )}
         </form>
@@ -414,7 +455,13 @@ export default function Checkout() {
         <button
           type="submit"
           form="checkout-form"
-          disabled={menuLoading || !cartItemsAreAvailable || submitting}
+          disabled={
+            menuLoading ||
+            restaurantStatusLoading ||
+            !orderingEnabled ||
+            !cartItemsAreAvailable ||
+            submitting
+          }
           className="mx-auto flex min-h-12 w-full max-w-lg items-center justify-between gap-3 rounded-full bg-[#31573a] px-5 font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2"
         >
           <span className="inline-flex items-center gap-2">
