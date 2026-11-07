@@ -15,6 +15,7 @@ import {
 import { useOrderStatusUpdates } from "../../hooks/useOrderStatusUpdates";
 
 const orderStatusLabels: Record<OrderStatus, string> = {
+  PENDING_PAYMENT: "Payment Pending",
   PLACED: "Order Placed",
   PREPARING: "Preparing",
   READY: "Ready for pickup",
@@ -27,6 +28,8 @@ const paymentStatusLabels: Record<PaymentStatus, string> = {
   PENDING_VERIFICATION: "Payment Pending Verification",
   PAID: "Paid",
   REJECTED: "Payment Rejected",
+  CANCELLED: "Payment Cancelled",
+  EXPIRED: "Payment Expired",
 };
 
 const orderProgress: OrderStatus[] = [

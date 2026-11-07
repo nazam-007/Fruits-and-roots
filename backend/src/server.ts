@@ -7,6 +7,7 @@ import { db } from "./db";
 import menuRoutes from "./routes/menu";
 import orderRoutes from "./routes/orders";
 import adminRoutes from "./routes/admin";
+import { startPendingPaymentExpiryWorker } from "./paymentExpiry";
 
 const app = express();
 
@@ -104,6 +105,7 @@ app.use("/api", orderRoutes);
 export { app };
 
 if (require.main === module) {
+  startPendingPaymentExpiryWorker();
   app.listen(PORT, () => {
     console.log(`Fruits & Roots backend running at http://localhost:${PORT}`);
   });

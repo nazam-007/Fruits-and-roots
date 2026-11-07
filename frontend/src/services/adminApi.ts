@@ -12,7 +12,10 @@ export type AdminPaymentStatus =
   | "PENDING_PAYMENT"
   | "PENDING_VERIFICATION"
   | "PAID"
-  | "REJECTED";
+  | "REJECTED"
+  | "CANCELLED"
+  | "EXPIRED";
+export type AdminOrderLifecycleStatus = AdminOrderStatus | "PENDING_PAYMENT";
 export type AdminPaymentSource = "DEMO" | "MANUAL_UPI" | null;
 
 export type AdminOrderRow = {
@@ -25,9 +28,12 @@ export type AdminOrderRow = {
   table_number?: string | null;
   total_amount: number;
   payment_status: AdminPaymentStatus;
-  order_status: AdminOrderStatus;
+  order_status: AdminOrderLifecycleStatus;
   created_at: string;
+  payment_expires_at?: string;
   payment_source: AdminPaymentSource;
+  transaction_reference?: string | null;
+  reconciliation_required?: boolean;
 };
 
 export type AdminOrderStatusCounts = Record<
@@ -41,6 +47,10 @@ export type AdminOrderDetails = AdminOrderRow & {
   verified_transaction_reference: string | null;
   verified_by: string | null;
   verified_at: string | null;
+  reconciliation_required: boolean;
+  reconciliation_flagged_at: string | null;
+  payment_expires_at: string;
+  payment_expired: boolean;
   items: Array<{
     productId: string;
     productName: string;
@@ -236,6 +246,28 @@ export function fetchAdminOrder(orderId: string, signal?: AbortSignal) {
   );
 }
 
+export function fetchAdminPaymentQueue(
+  queue: "verification" | "reconciliation",
+  limit: number,
+  offset: number,
+  signal?: AbortSignal,
+) {
+  return request<{
+    items: Array<AdminOrderRow & {
+      recorded_payment_status: AdminPaymentStatus;
+      transaction_reference: string | null;
+      reconciliation_required: boolean;
+    }>;
+    total: number;
+    limit: number;
+    offset: number;
+    totalPages: number;
+  }>(`/${queue === "verification" ? "payment-claims" : "payment-reconciliation"}?${new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  })}`, { signal });
+}
+
 export function updateAdminOrderStatus(
   orderId: string,
   status: "PREPARING" | "READY" | "COMPLETED",
@@ -251,7 +283,11 @@ export function verifyAdminPayment(
   decision: "PAID" | "REJECTED",
   verifiedTransactionReference?: string,
 ) {
-  return request<{ orderId: string; paymentStatus: AdminPaymentStatus }>(
+  return request<{
+    orderId: string;
+    paymentStatus: AdminPaymentStatus;
+    reconciliationRequired: boolean;
+  }>(
     `/orders/${encodeURIComponent(orderId)}/payment-verification`,
     {
       method: "POST",

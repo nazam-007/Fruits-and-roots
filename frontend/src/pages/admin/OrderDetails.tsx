@@ -5,8 +5,8 @@ import {
   fetchAdminOrder,
   updateAdminOrderStatus,
   verifyAdminPayment,
+  type AdminOrderLifecycleStatus,
   type AdminOrderDetails as OrderDetailsType,
-  type AdminOrderStatus,
 } from "../../services/adminApi";
 import { useVisiblePolling } from "../../hooks/useVisiblePolling";
 
@@ -22,7 +22,7 @@ function formatFulfillment(order: OrderDetailsType) {
     : "Takeaway";
 }
 
-const nextStatus: Partial<Record<AdminOrderStatus, "PREPARING" | "READY" | "COMPLETED">> = {
+const nextStatus: Partial<Record<AdminOrderLifecycleStatus, "PREPARING" | "READY" | "COMPLETED">> = {
   PLACED: "PREPARING",
   PREPARING: "READY",
   READY: "COMPLETED",
@@ -106,7 +106,9 @@ export default function AdminOrderDetails() {
     if (
       decision === "PAID" &&
       !window.confirm(
-        "Confirm that you independently matched the payment in the merchant bank or UPI records?",
+        canReconcilePayment
+          ? "Confirm receipt in the merchant bank or UPI records? This will flag the cancelled or expired attempt for reconciliation only and will not place the order."
+          : "Confirm that you independently matched the payment in the merchant bank or UPI records?",
       )
     ) {
       return;
@@ -122,14 +124,16 @@ export default function AdminOrderDetails() {
     setError(null);
     setNotice(null);
     try {
-      await verifyAdminPayment(
+      const result = await verifyAdminPayment(
         order.id,
         decision,
         decision === "PAID" ? reference.trim() : undefined,
       );
       setReference("");
       setNotice(
-        decision === "PAID"
+        result.reconciliationRequired
+          ? "Payment receipt confirmed. The expired or cancelled attempt is flagged for authorized reconciliation and was not placed."
+          : decision === "PAID"
           ? "Manual payment marked verified."
           : "Payment claim rejected.",
       );
@@ -169,7 +173,21 @@ export default function AdminOrderDetails() {
   const canVerifyPayment =
     order.payment_status === "PENDING_VERIFICATION" &&
     order.recorded_payment_status === "PENDING_VERIFICATION" &&
-    order.payment_source === "MANUAL_UPI";
+    order.payment_source === "MANUAL_UPI" &&
+    !order.payment_expired;
+  const canReconcilePayment =
+    (["CANCELLED", "EXPIRED"].includes(order.payment_status) ||
+      order.payment_expired) &&
+    order.payment_source === "MANUAL_UPI" &&
+    ["PENDING_PAYMENT", "PENDING_VERIFICATION", "CANCELLED", "EXPIRED"].includes(
+      order.recorded_payment_status ?? "",
+    ) &&
+    !order.reconciliation_required;
+  const paymentAttemptStatus =
+    order.payment_expired &&
+    ["PENDING_PAYMENT", "PENDING_VERIFICATION"].includes(order.payment_status)
+      ? "EXPIRED"
+      : order.payment_status;
 
   return (
     <div className="mx-auto max-w-5xl space-y-5">
@@ -233,10 +251,22 @@ export default function AdminOrderDetails() {
               </>
             )}
           </dl>
-          {canVerifyPayment && (
+          {canReconcilePayment && (
+            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+              This attempt is {paymentAttemptStatus.toLowerCase()}. Confirming receipt will only flag it for authorized reconciliation; it will not place or fulfill the order.
+            </p>
+          )}
+          {order.reconciliation_required && (
+            <p role="status" className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-5 text-amber-900">
+              Payment receipt is flagged for authorized reconciliation. This attempt remains {paymentAttemptStatus.toLowerCase()} and is not an operational order.
+            </p>
+          )}
+          {(canVerifyPayment || canReconcilePayment) && (
             <div className="mt-5 border-t border-[#eeece4] pt-4">
               <label htmlFor="verified-reference" className="mb-1.5 block text-sm font-semibold text-[#394b38]">
-                Confirmed bank/UPI reference
+                {canReconcilePayment
+                  ? "Confirmed bank/UPI reference for reconciliation"
+                  : "Confirmed bank/UPI reference"}
               </label>
               <input
                 id="verified-reference"
@@ -247,7 +277,9 @@ export default function AdminOrderDetails() {
                 className="min-h-11 w-full rounded-xl border border-[#e5e2d6] bg-[#fdfcf9] px-3 text-sm outline-none focus:border-[#78916c]"
               />
               <p className="mt-2 text-xs leading-5 text-[#73796d]">
-                Mark paid only after confirming receipt in the merchant account. Verified references cannot be reused.
+                {canReconcilePayment
+                  ? "Confirm receipt in the merchant account. This only records the payment for authorized reconciliation and does not fulfill the order."
+                  : "Mark paid only after confirming receipt in the merchant account. Verified references cannot be reused."}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
@@ -256,7 +288,9 @@ export default function AdminOrderDetails() {
                   onClick={() => void decidePayment("PAID")}
                   className="min-h-10 rounded-full bg-[#31573a] px-4 text-sm font-semibold text-white disabled:opacity-50"
                 >
-                  Verify and mark paid
+                  {canReconcilePayment
+                    ? "Confirm and flag for reconciliation"
+                    : "Verify and mark paid"}
                 </button>
                 <button
                   type="button"

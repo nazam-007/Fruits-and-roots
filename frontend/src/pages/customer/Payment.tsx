@@ -14,6 +14,7 @@ import {
   type OrderDetails,
 } from "../../services/ordersApi";
 import {
+  cancelPendingPayment,
   simulateDemoPayment,
   submitManualPaymentClaim,
 } from "../../services/paymentsApi";
@@ -43,6 +44,7 @@ export default function Payment() {
   const [transactionReference, setTransactionReference] = useState("");
   const [claimSubmitted, setClaimSubmitted] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const submittingRef = useRef(false);
 
   const refreshOrder = useCallback(async () => {
@@ -70,6 +72,47 @@ export default function Payment() {
     const timeoutId = window.setTimeout(() => void refreshOrder(), 0);
     return () => window.clearTimeout(timeoutId);
   }, [refreshOrder]);
+
+  useEffect(() => {
+    if (
+      order?.paymentStatus === "EXPIRED" ||
+      order?.paymentStatus === "REJECTED"
+    ) {
+      try {
+        window.sessionStorage.removeItem(IDEMPOTENCY_STORAGE_KEY);
+      } catch (storageError) {
+        console.error("Unable to clear the ended checkout key.", storageError);
+      }
+    }
+  }, [order?.paymentStatus]);
+
+  const handleCancelPayment = async () => {
+    if (submittingRef.current || !orderId || !trackingToken) return;
+    submittingRef.current = true;
+    setCancelling(true);
+    setSubmitting(true);
+    setError(null);
+    try {
+      await cancelPendingPayment(orderId, trackingToken);
+      try {
+        window.sessionStorage.removeItem(IDEMPOTENCY_STORAGE_KEY);
+        window.sessionStorage.removeItem(`fruits-roots-order-token:${orderId}`);
+      } catch (storageError) {
+        console.error("Unable to clear the cancelled checkout session.", storageError);
+      }
+      navigate("/cart", { replace: true });
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Unable to cancel this payment attempt.",
+      );
+    } finally {
+      submittingRef.current = false;
+      setCancelling(false);
+      setSubmitting(false);
+    }
+  };
 
   const copyUpiId = async () => {
     if (!order?.paymentDetails?.upiId) return;
@@ -172,6 +215,15 @@ export default function Payment() {
   const paymentIsPending =
     order.paymentStatus === "PENDING_PAYMENT" &&
     order.orderStatus !== "CANCELLED";
+  const paymentCanBeCancelled = [
+    "PENDING_PAYMENT",
+    "PENDING_VERIFICATION",
+  ].includes(order.paymentStatus);
+  const paymentAttemptEnded = [
+    "CANCELLED",
+    "EXPIRED",
+    "REJECTED",
+  ].includes(order.paymentStatus);
 
   return (
     <div className="mx-auto max-w-6xl pb-24 sm:pb-8">
@@ -199,6 +251,16 @@ export default function Payment() {
         <p className="mt-2 text-sm leading-6 text-[#73796d] sm:text-base">
           Scan the QR code using your preferred UPI app.
         </p>
+        {order.paymentExpiresAt && paymentCanBeCancelled && (
+          <p className="mt-2 text-xs text-[#73796d]">
+            This payment attempt expires at{" "}
+            {new Date(order.paymentExpiresAt).toLocaleTimeString([], {
+              hour: "numeric",
+              minute: "2-digit",
+            })}
+            .
+          </p>
+        )}
       </header>
 
       {order.demoPaymentsEnabled && paymentIsPending && (
@@ -379,6 +441,35 @@ export default function Payment() {
             Payment status is only changed by the server’s configured payment
             workflow.
           </p>
+          {paymentCanBeCancelled && (
+            <button
+              type="button"
+              onClick={() => void handleCancelPayment()}
+              disabled={submitting || cancelling}
+              className="mt-5 min-h-11 w-full rounded-full border border-[#d7ded2] bg-white px-5 font-semibold text-[#31573a] transition hover:bg-[#f2f4ed] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {cancelling ? "Cancelling payment..." : "Cancel Payment · Back to Cart"}
+            </button>
+          )}
+          {paymentAttemptEnded && (
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  window.sessionStorage.removeItem(IDEMPOTENCY_STORAGE_KEY);
+                  window.sessionStorage.removeItem(
+                    `fruits-roots-order-token:${orderId}`,
+                  );
+                } catch (storageError) {
+                  console.error("Unable to clear the ended checkout session.", storageError);
+                }
+                navigate("/cart", { replace: true });
+              }}
+              className="mt-5 min-h-11 w-full rounded-full border border-[#d7ded2] bg-white px-5 font-semibold text-[#31573a] transition hover:bg-[#f2f4ed]"
+            >
+              Return to Cart
+            </button>
+          )}
         </section>
 
         <aside className="rounded-3xl border border-[#e7e4d8] bg-white p-5 shadow-[0_12px_36px_-28px_rgba(30,51,35,0.4)] lg:sticky lg:top-24 sm:p-6">
