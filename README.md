@@ -44,6 +44,8 @@ Edit `backend\.env` and configure the required values:
 | `PORT` | Backend HTTP port; defaults to `5000`. |
 | `FRONTEND_ORIGIN` | Exact allowed frontend origin(s), comma-separated; local default is `http://localhost:5173`. Production requires HTTPS origins. |
 | `DATABASE_URL` | PostgreSQL connection string. Keep it on the backend only. |
+| `DATABASE_TLS_MODE` | `verify-full` is required/default in production; `disable` is permitted only outside production. Verified-mode URLs must have no query parameters. |
+| `DATABASE_CA_CERT_PATH` | Optional mounted trusted CA PEM for the target database; otherwise Node's trusted roots are used. Certificate and hostname verification remain enabled. |
 | `MERCHANT_UPI_ID` | Merchant UPI ID used to display payment instructions. |
 | `MERCHANT_UPI_NAME` | Merchant display name for payment instructions. |
 | `ORDER_TRACKING_SECRET` | Long, random secret used to protect order-tracking access. |
@@ -205,7 +207,7 @@ In production, operational lists and dashboard counts require a paid manual UPI 
 - [ ] Terminate HTTPS at the public ingress/load balancer and redirect HTTP to HTTPS. Express does not issue TLS certificates. Set `NODE_ENV=production`; the admin cookie uses `Secure` and Helmet enables HSTS in production.
 - [ ] Set `FRONTEND_ORIGIN` to exact HTTPS frontend origin(s), comma-separated, with no paths or wildcards. Production startup rejects missing, non-HTTPS, or non-exact origins.
 - [ ] Store `DATABASE_URL`, `ADMIN_PASSWORD_HASH`, `ORDER_TRACKING_SECRET`, merchant configuration, `SUPABASE_URL`, and `SUPABASE_SERVICE_ROLE_KEY` in the deployment secret manager. Rotate credentials if exposed. Keep service-role credentials exclusively on the backend.
-- [ ] Use a dedicated least-privilege PostgreSQL role for the backend. Require TLS for Supabase PostgreSQL connections (for example, provider-supported `sslmode=require`) and verify permissions before deployment.
+- [ ] Use a dedicated least-privilege PostgreSQL role for the backend. Set `DATABASE_TLS_MODE=verify-full`, use a query-free database URL, mount the appropriate trusted CA if required, and verify the actual pool connection with `npm run db:verify`. Do not put SSL query options in the URL; they can replace the driver's explicit TLS configuration.
 - [ ] Review Supabase Storage bucket visibility, upload size/type limits, and object policies. Public reads are needed for current public menu image URLs; writes should remain through the authenticated backend only.
 - [ ] Rate limits are stored in process memory. They reset on restart and are not shared across instances; use a shared store if deploying multiple backend instances. This project does not configure an external rate-limit store.
 - [ ] Express does not trust forwarded IP headers by default. If deployed behind a proxy, set `TRUSTED_PROXY_IPS` only to exact proxy IPs/CIDRs, and configure the proxy to overwrite forwarded-for headers rather than preserve untrusted client values. Do not set broad trust values such as `true`.
@@ -213,6 +215,8 @@ In production, operational lists and dashboard counts require a paid manual UPI 
 - [ ] Enable provider-side access/error monitoring and alerts for repeated login failures, rate-limit responses, database errors, and storage upload failures. Avoid logging passwords, tokens, or secret values.
 - [ ] Back up the database before applying schema migrations; review and apply them using the established migration workflow.
 - [ ] Manual UPI payment claims require staff to independently verify receipt before marking an order paid.
+
+The [Phase 2 database security proposal](docs/PHASE_2_DATABASE_SECURITY_2026-11-08.md) covers unexecuted migrations 014/015, session-table exposure, a new backend role, isolated integration setup and rollback. These migrations require review and explicit approval before execution. `npm run test:integration` from backend skips without an explicitly configured disposable target; it never provisions a database or applies migrations. Deployment remains on hold.
 
 The following read-only SQL can help review PostgreSQL grants and policies; review the results with a database administrator. These queries do not change schema or permissions:
 
