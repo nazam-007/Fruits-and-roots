@@ -1,6 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-const baseURL = process.env.FRONTEND_BASE_URL || "http://localhost:5173";
+const baseURL = "http://127.0.0.1:5181";
+// Every invocation owns its output; nothing is written into Vite's watched root.
+const artifacts = mkdtempSync(join(tmpdir(), "fruits-roots-playwright-"));
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -12,9 +17,23 @@ export default defineConfig({
   workers: 1,
   reporter: [
     ["list"],
-    ["html", { outputFolder: "playwright-report", open: "never" }],
+    ["html", { outputFolder: join(artifacts, "report"), open: "never" }],
   ],
-  outputDir: "test-results",
+  outputDir: join(artifacts, "results"),
+  webServer: [
+    {
+      command: "node --import tsx tests/browserServer.ts",
+      cwd: "../backend",
+      url: "http://127.0.0.1:5191/api/health",
+      reuseExistingServer: false,
+    },
+    {
+      command: "node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5181 --strictPort",
+      url: baseURL,
+      env: { VITE_API_URL: "http://127.0.0.1:5191" },
+      reuseExistingServer: false,
+    },
+  ],
   use: {
     baseURL,
     actionTimeout: 10_000,

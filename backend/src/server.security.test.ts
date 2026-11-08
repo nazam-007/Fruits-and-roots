@@ -480,6 +480,28 @@ test("admin orders and dashboard count only paid operational orders", async () =
       operationalQueries.length >= 3 &&
         operationalQueries.every((sql) => sql.includes("payment_status = 'PAID'")),
     );
+    const previousMode = process.env.NODE_ENV;
+    const productionStart = statements.length;
+    try {
+      process.env.NODE_ENV = "production";
+      for (const path of ["/api/admin/orders?status=ALL", "/api/admin/dashboard"]) {
+        const response = await fetch(`${baseUrl}${path}`, { headers: { Cookie: cookie } });
+        assert.equal(response.status, 200);
+      }
+    } finally {
+      process.env.NODE_ENV = previousMode;
+    }
+    const productionQueries = statements.slice(productionStart).filter((sql) =>
+      sql.includes("FROM orders"));
+    assert.equal(productionQueries.length, 3);
+    for (const sql of productionQueries) {
+      assert.match(sql, /verified_payment.payment_source = 'MANUAL_UPI'/);
+      assert.match(sql, /verified_payment.payment_status = 'PAID'/);
+      assert.match(sql, /verified_payment.verified_at IS NOT NULL/);
+      assert.match(sql, /verified_payment.verified_by IS NOT NULL/);
+      assert.match(sql, /verified_payment.verified_transaction_reference IS NOT NULL/);
+      assert.match(sql, /verified_payment.reconciliation_required IS FALSE/);
+    }
     assert.ok(
       statements.some(
         (sql) =>
@@ -572,6 +594,41 @@ test("customer payment cancellation is authenticated, idempotent, and never plac
   }
 });
 
+test("customer references request verification without confirming payment", async () => {
+  const originalConnect = database.connect.bind(database);
+  const token = "c".repeat(48);
+  const statements: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      statements.push(sql);
+      return sql.includes("FOR UPDATE OF o, p")
+        ? { rows: [{
+            payment_status: "PENDING_PAYMENT", recorded_payment_status: "PENDING_PAYMENT",
+            order_status: "PENDING_PAYMENT", payment_attempt_active: true,
+            tracking_token_hash: createHash("sha256").update(token).digest("hex"),
+          }], rowCount: 1 }
+        : { rows: [], rowCount: 1 };
+    },
+    release: () => undefined,
+  } as unknown as PoolClient;
+  Object.defineProperty(database, "connect", { configurable: true, value: async () => client });
+  try {
+    const response = await fetch(`${baseUrl}/api/orders/00000000-0000-4000-8000-000000000105/payment-claim`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ transactionReference: "invented-reference", paymentStatus: "PAID" }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).paymentStatus, "PENDING_VERIFICATION");
+    assert.ok(statements.includes("COMMIT"));
+    assert.ok(statements.some((sql) => sql.includes("FOR UPDATE OF o, p")));
+    assert.ok(statements.filter((sql) => sql.startsWith("UPDATE")).every((sql) =>
+      !sql.includes("'PAID'") && !sql.includes("'PLACED'") && !sql.includes("verified_at")));
+  } finally {
+    Object.defineProperty(database, "connect", { configurable: true, value: originalConnect });
+  }
+});
+
 test("manual verification is idempotent and late receipts only enter reconciliation", async () => {
   const originalConnect = database.connect.bind(database);
   const originalQuery = database.query.bind(database);
@@ -594,6 +651,7 @@ test("manual verification is idempotent and late receipts only enter reconciliat
             payment_status: paymentStatus,
             order_status: orderStatus,
             payment_expires_at: paymentExpiresAt,
+            payment_expired: paymentExpiresAt.getTime() <= Date.now(),
             recorded_payment_status: paymentStatus,
             payment_source: "MANUAL_UPI",
             verified_transaction_reference: verifiedReference,
@@ -670,6 +728,23 @@ test("manual verification is idempotent and late receipts only enter reconciliat
     assert.equal(repeatedReconciliation.status, 200);
     assert.equal((await repeatedReconciliation.json()).reconciliationRequired, true);
     assert.equal(writes.length, 2);
+    for (const [initialStatus, expectedStatus] of [
+      ["CANCELLED", "CANCELLED"],
+      ["PENDING_VERIFICATION", "EXPIRED"],
+    ]) {
+      paymentStatus = initialStatus;
+      verifiedReference = null;
+      reconciliationRequired = false;
+      orderStatus = "PENDING_PAYMENT";
+      writes.length = 0;
+      const response = await verify(`late-${initialStatus}-reference`);
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.paymentStatus, expectedStatus);
+      assert.equal(body.reconciliationRequired, true);
+      assert.equal(orderStatus, "PENDING_PAYMENT");
+      assert.ok(writes.every((sql) => !sql.includes("order_status = CASE")));
+    }
   } finally {
     Object.defineProperty(database, "connect", {
       configurable: true,
@@ -679,6 +754,25 @@ test("manual verification is idempotent and late receipts only enter reconciliat
       configurable: true,
       value: originalQuery,
     });
+  }
+});
+
+test("production rejects demo confirmation even when the flag is enabled", async () => {
+  const previousMode = process.env.NODE_ENV;
+  const previousFlag = process.env.DEMO_PAYMENTS_ENABLED;
+  try {
+    process.env.NODE_ENV = "production";
+    process.env.DEMO_PAYMENTS_ENABLED = "true";
+    const config = await fetch(`${baseUrl}/api/payment-config`);
+    assert.equal((await config.json()).demoPaymentsEnabled, false);
+    const response = await fetch(`${baseUrl}/api/orders/00000000-0000-4000-8000-000000000104/demo-payment`, {
+      method: "POST",
+    });
+    assert.equal(response.status, 404);
+  } finally {
+    process.env.NODE_ENV = previousMode;
+    if (previousFlag === undefined) delete process.env.DEMO_PAYMENTS_ENABLED;
+    else process.env.DEMO_PAYMENTS_ENABLED = previousFlag;
   }
 });
 

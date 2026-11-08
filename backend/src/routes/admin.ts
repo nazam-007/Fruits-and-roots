@@ -12,6 +12,7 @@ import {
   verifyAdminPassword,
 } from "../adminPassword";
 import { db } from "../db";
+import { operationalPaymentPredicate } from "../operationalOrders";
 import { publishOrderStatus } from "../orderStatusEvents";
 import { publishRestaurantStatusChange } from "../catalogEvents";
 import { publishCatalogChange } from "../catalogEvents";
@@ -345,10 +346,10 @@ router.get("/dashboard", async (_req, res) => {
        ), operational_orders AS (
          SELECT o.id, o.order_status, o.created_at, o.total_amount
          FROM orders o
-         WHERE o.payment_status = 'PAID'
+         WHERE ${operationalPaymentPredicate("o")}
        )
        SELECT
-         COUNT(*)::int AS total_orders,
+         COUNT(o.id)::int AS total_orders,
          COUNT(*) FILTER (WHERE o.created_at >= local_day.start_at)::int AS total_orders_today,
          COUNT(*) FILTER (WHERE o.order_status = 'PLACED' AND o.created_at >= local_day.start_at)::int AS new_orders,
          COUNT(*) FILTER (WHERE o.order_status = 'PREPARING' AND o.created_at >= local_day.start_at)::int AS preparing_orders,
@@ -378,8 +379,8 @@ router.get("/dashboard", async (_req, res) => {
                  AND p.payment_source = 'DEMO'
              )
          ), 0)::bigint AS demo_revenue_today
-       FROM operational_orders o
-       CROSS JOIN local_day
+       FROM local_day
+       LEFT JOIN operational_orders o ON TRUE
        GROUP BY local_day.start_at`,
     );
     res.json({
@@ -424,7 +425,7 @@ router.get("/orders", async (req, res) => {
                 (SELECT p.payment_source FROM payments p
                  WHERE p.order_id = o.id LIMIT 1) AS payment_source
          FROM orders o
-         WHERE o.payment_status = 'PAID'
+         WHERE ${operationalPaymentPredicate("o")}
            AND ($1 = 'ALL' OR o.order_status = $1)
            AND (
              $4::date IS NULL OR (
@@ -445,7 +446,7 @@ router.get("/orders", async (req, res) => {
            COUNT(*) FILTER (WHERE order_status = 'COMPLETED')::int AS completed,
            COUNT(*) FILTER (WHERE order_status = 'CANCELLED')::int AS cancelled
          FROM orders
-         WHERE payment_status = 'PAID'
+         WHERE ${operationalPaymentPredicate("orders")}
            AND (
              $1::date IS NULL OR (
                created_at >= ($1::date::timestamp AT TIME ZONE 'Asia/Kolkata')

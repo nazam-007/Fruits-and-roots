@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const totals: Record<string, number> = {
+const initialTotals: Record<string, number> = {
   ALL: 31,
   PLACED: 31,
   PREPARING: 14,
@@ -20,6 +20,7 @@ const labels: Record<string, string> = {
 };
 
 test("admin orders paginate each status and retain the page during polling", async ({ page }) => {
+  const totals = { ...initialTotals };
   await page.route("**/api/admin/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -95,7 +96,9 @@ test("admin orders paginate each status and retain the page during polling", asy
   totals.PLACED = 15;
   await expect(page).toHaveURL(/status=PLACED&page=1/, { timeout: 5_000 });
   await expect(page.locator("#admin-orders-table tbody tr")).toHaveCount(15);
-  await expect(page.getByRole("button", { name: /New 15/ })).toBeVisible();
+  const newTab = page.getByRole("button", { name: /^New/ });
+  await expect(newTab).toHaveAttribute("aria-pressed", "true");
+  await expect(newTab.locator("span")).toHaveText("15");
   await page.goBack();
   await expect(page).toHaveURL(/status=PLACED$/);
   await page.goForward();
@@ -120,7 +123,7 @@ test("admin orders paginate each status and retain the page during polling", asy
   await expect(page.locator("#admin-orders-table tbody tr")).toHaveCount(14);
   await expect(page.getByRole("button", { name: "Next page" })).toBeDisabled();
   totals.PREPARING = 16;
-  await expect(page.getByRole("button", { name: /Preparing 16/ })).toBeVisible({
+  await expect(page.getByRole("button", { name: /^Preparing/ }).locator("span")).toHaveText("16", {
     timeout: 5_000,
   });
   await expect(page.getByRole("button", { name: "Next page" })).toBeEnabled();
