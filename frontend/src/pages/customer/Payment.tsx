@@ -434,7 +434,7 @@ export default function Payment() {
                     setTransactionReference(event.target.value);
                     setClaimSubmitted(false);
                   }}
-                  maxLength={120}
+                  maxLength={100}
                   placeholder="Enter the reference from your UPI app"
                   className="min-h-12 w-full rounded-xl border border-[#e5e2d6] bg-[#fdfcf9] px-4 text-sm outline-none focus:border-[#78916c]"
                 />
