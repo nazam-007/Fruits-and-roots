@@ -613,10 +613,17 @@ test("customer references request verification without confirming payment", asyn
   } as unknown as PoolClient;
   Object.defineProperty(database, "connect", { configurable: true, value: async () => client });
   try {
+    const oversized = await fetch(`${baseUrl}/api/orders/00000000-0000-4000-8000-000000000105/payment-claim`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ transactionReference: "R".repeat(101) }),
+    });
+    assert.equal(oversized.status, 400);
+    assert.equal(statements.length, 0, "oversized reference must not reach the database");
     const response = await fetch(`${baseUrl}/api/orders/00000000-0000-4000-8000-000000000105/payment-claim`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ transactionReference: "invented-reference", paymentStatus: "PAID" }),
+      body: JSON.stringify({ transactionReference: "R".repeat(100), paymentStatus: "PAID" }),
     });
     assert.equal(response.status, 200);
     assert.equal((await response.json()).paymentStatus, "PENDING_VERIFICATION");

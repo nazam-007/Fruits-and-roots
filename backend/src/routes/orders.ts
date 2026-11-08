@@ -920,7 +920,7 @@ router.post(
 router.post("/orders/:orderId/payment-claim", limitOrders, async (req, res) => {
   const orderId = z.string().uuid().safeParse(req.params.orderId);
   const parsedBody = z.object({
-    transactionReference: z.string().trim().min(6).max(120)
+    transactionReference: z.string().trim().min(6).max(100)
       .regex(/^[A-Za-z0-9/-]+$/),
   }).safeParse(req.body);
   const token = getBearerToken(req);
