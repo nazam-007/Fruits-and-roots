@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-const apiBaseURL = process.env.API_BASE_URL || "http://localhost:5000";
+const apiBaseURL = "http://127.0.0.1:5191";
 const menuEndpoint = `${apiBaseURL}/api/menu`;
 const allDaySchedule = {
   monday: { isOpen: true, allDay: true, opensAt: "00:00", closesAt: "00:00" },
@@ -420,7 +420,7 @@ test("customer menu shows closed status and the next scheduled opening", async (
   await expect(page.getByText(/Opens next:/)).toContainText("IST");
 });
 
-test("admin category creation is database-backed and assignable to a product", async ({
+test("admin category creation is assignable to a product using mocked APIs", async ({
   page,
 }) => {
   const categories = [
@@ -435,6 +435,10 @@ test("admin category creation is database-backed and assignable to a product", a
     const url = new URL(request.url());
     if (url.pathname === "/api/admin/auth/session" && request.method() === "GET") {
       await route.fulfill({ json: { adminId: "test-admin" } });
+      return;
+    }
+    if (url.pathname === "/api/admin/tags" && request.method() === "GET") {
+      await route.fulfill({ json: [] });
       return;
     }
     if (url.pathname === "/api/admin/categories" && request.method() === "GET") {
@@ -555,6 +559,7 @@ test("admin category creation is database-backed and assignable to a product", a
         id: String(input.name).toLowerCase().replace(/[^a-z0-9]+/g, "-"),
         categoryId: category?.id,
         ...input,
+        tags: [],
         archived: false,
         orderCount: input.name === "Seasonal Bowl" ? 1 : 0,
         variants: [
@@ -845,8 +850,10 @@ test("customer tracking sees status changes automatically and stops after comple
   page,
 }) => {
   const orderId = "00000000-0000-4000-8000-000000000001";
-  const statuses = ["PLACED", "PREPARING", "READY", "COMPLETED"] as const;
+  let status: "PLACED" | "PREPARING" | "READY" | "COMPLETED" = "PLACED";
   let requestCount = 0;
+  // Exercise polling fallback without an uncontrolled live SSE response.
+  await page.route(`**/api/orders/${orderId}/events`, (route) => route.abort());
   await page.addInitScript(
     ({ id }) => {
       window.sessionStorage.setItem(`fruits-roots-order-token:${id}`, "test-tracking-token");
@@ -856,7 +863,6 @@ test("customer tracking sees status changes automatically and stops after comple
   await page.route(`**/api/orders/${orderId}`, async (route) => {
     const authorization = route.request().headers().authorization;
     expect(authorization).toBe("Bearer test-tracking-token");
-    const status = statuses[Math.min(requestCount, statuses.length - 1)];
     requestCount += 1;
     await route.fulfill({
       status: 200,
@@ -887,9 +893,14 @@ test("customer tracking sees status changes automatically and stops after comple
       { timeout: 5_000 },
     ).toContain("font-semibold");
   await expectActiveStatus("Order Placed");
-  await expectActiveStatus("Preparing");
-  await expectActiveStatus("Ready for pickup");
-  await expectActiveStatus("Completed");
+  for (const [next, label] of [
+    ["PREPARING", "Preparing"],
+    ["READY", "Ready for pickup"],
+    ["COMPLETED", "Completed"],
+  ] as const) {
+    status = next;
+    await expectActiveStatus(label);
+  }
 
   const completedRequestCount = requestCount;
   await page.waitForTimeout(2_500);
@@ -975,6 +986,7 @@ test("dashboard auto-refreshes all-time order count using mocked responses", asy
 test("dashboard does not show zero when the all-time count is missing", async ({
   page,
 }) => {
+  await mockAcceptingOrders(page);
   await page.route("**/api/admin/auth/session", async (route) => {
     await route.fulfill({
       status: 200,
@@ -1022,9 +1034,12 @@ test("dashboard does not show zero when the all-time count is missing", async ({
   });
 
   await page.goto("/admin");
-  await expect(page.getByRole("alert")).toContainText(
+  await expect(page.getByRole("alert").filter({
+    hasText: "Dashboard response is missing the all-time order count.",
+  })).toHaveText(
     "Dashboard response is missing the all-time order count.",
   );
+  await expect(page.getByRole("alert")).toHaveCount(1);
   const allOrdersCard = page.locator("article").filter({ hasText: "All orders" }).first();
   await expect(allOrdersCard).toContainText("—");
   await expect(allOrdersCard).not.toContainText("0");

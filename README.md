@@ -183,16 +183,22 @@ Frontend:
 Set-Location frontend
 npm run build
 npm run lint
+npm run test:e2e
 ```
 
 Backend:
 
 ```powershell
 Set-Location backend
+npm test
 npm run build
 ```
 
-The backend tests cover admin password hash compatibility and the extended passphrase length policy.
+The backend tests cover password hashing, scheduling, authorization, payment-attempt safety and event delivery with mocked database calls. Playwright starts an isolated read-only API contract harness and frontend on ports 5191/5181; it never connects to Supabase. Keep both dependency sets installed and these ports free. Run browser suites sequentially. Each run writes reports/results to its own `fruits-roots-playwright-*` directory under the OS temporary directory, outside Vite's watched root. Open the selected HTML report with `npm run test:e2e:report -- <report-directory>` from `frontend`.
+
+These checks do not establish database transaction/concurrency correctness. See [Phase 1 remediation and isolated integration plan](docs/PHASE_1_REMEDIATION_2026-11-08.md) for the disposable database strategy, production blockers, and configuration checklist. Deployment remains on hold.
+
+In production, operational lists and dashboard counts require a paid manual UPI payment with admin verification metadata and no reconciliation flag. Historical demo and incomplete verification records remain stored and are excluded; no automatic financial backfill is performed.
 
 ## Production security checklist
 

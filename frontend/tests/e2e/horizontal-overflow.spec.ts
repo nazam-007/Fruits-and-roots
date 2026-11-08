@@ -106,6 +106,8 @@ async function mockAdminReadApis(context: BrowserContext) {
       body = { adminId: "responsive-test-admin" };
     } else if (path.endsWith("/tags")) {
       body = [];
+    } else if (path.endsWith("/categories")) {
+      body = [{ id: "00000000-0000-4000-8000-000000000001", name: "Fruit Bowls", sortOrder: 0 }];
     } else if (path.endsWith("/dashboard")) {
       body = {
         summary: {
@@ -156,6 +158,7 @@ async function mockAdminReadApis(context: BrowserContext) {
         availabilityStatus: "AVAILABLE",
         featured: false,
         archived: false,
+        tags: [],
         variants: [{ size: "Regular", price: 250 }],
       }];
     }
@@ -782,7 +785,9 @@ for (const viewport of viewports) {
       } else if (route === "/admin/login") {
         await expect(page.getByRole("heading", { name: "Admin sign in" })).toBeVisible();
       } else if (route === "/admin") {
-        await expect(page.getByRole("region", { name: "Order statistics" }).locator("article")).toHaveCount(6);
+        const statistics = page.getByRole("region", { name: "Order statistics" });
+        await expect(statistics.locator("article")).toHaveCount(7);
+        await expect(statistics.getByRole("link", { name: /Cancelled/ })).toBeVisible();
       } else if (route === "/admin/orders/responsive-test-order") {
         await expect(page.getByRole("button", { name: "Move to READY" })).toBeVisible();
       } else if (route === "/admin/menu") {
