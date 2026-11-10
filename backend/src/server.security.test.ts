@@ -636,6 +636,81 @@ test("customer references request verification without confirming payment", asyn
   }
 });
 
+test("concurrent verification serializes retries and preserves pending state on database failures", async (t) => {
+  const originalConnect = database.connect;
+  const originalQuery = database.query;
+  const originalError = console.error;
+  try {
+    console.error = () => undefined; // Expected injected failures; never print provider errors.
+    Object.defineProperty(database, "query", { configurable: true, value: (async (sql: string) => {
+      assert.ok(sql.includes("FROM admin_sessions"), "Unexpected pool query must not contact a real database");
+      return { rows: [{ admin_id: "test-admin" }], rowCount: 1 };
+    }) as typeof database.query });
+    for (const fault of [null, "55P03", "57014", "40P01", "23505"] as const) {
+      await t.test(fault || "same-reference concurrent success", async () => {
+        let state = { payment_status: "PENDING_VERIFICATION", order_status: "PENDING_PAYMENT",
+          verified_transaction_reference: null as string | null };
+        let committedUpdates = 0;
+        let lockTail = Promise.resolve();
+        let released = 0;
+        Object.defineProperty(database, "connect", { configurable: true, value: (async () => {
+          let unlock: (() => void) | undefined;
+          let staged = { ...state };
+          let updates = 0;
+          const releaseLock = () => { unlock?.(); unlock = undefined; };
+          return {
+            query: async (sql: string, values?: unknown[]) => {
+              if (sql === "BEGIN") return { rows: [], rowCount: 0 };
+              if (sql === "COMMIT") {
+                state = staged; committedUpdates += updates; releaseLock();
+                return { rows: [], rowCount: 0 };
+              }
+              if (sql === "ROLLBACK") { releaseLock(); return { rows: [], rowCount: 0 }; }
+              if (sql.includes("SELECT o.payment_status, o.order_status")) {
+                assert.ok(sql.includes("FOR UPDATE OF o, p"));
+                const previous = lockTail;
+                lockTail = new Promise<void>((done) => { unlock = done; });
+                await previous;
+                staged = { ...state };
+                if (fault) throw Object.assign(new Error("injected database failure"), { code: fault });
+                return { rows: [{ ...staged, recorded_payment_status: staged.payment_status,
+                  payment_expired: false, payment_source: "MANUAL_UPI", reconciliation_required: false }], rowCount: 1 };
+              }
+              if (sql.includes("UPDATE payments")) {
+                staged.payment_status = values![1] as string;
+                staged.verified_transaction_reference = values![3] as string;
+                updates++;
+              } else if (sql.includes("UPDATE orders")) {
+                staged.payment_status = values![1] as string;
+                staged.order_status = "PLACED"; updates++;
+              } else throw new Error("Unexpected transaction query");
+              return { rows: [], rowCount: 1 };
+            },
+            release: () => { releaseLock(); released++; },
+          };
+        }) as typeof database.connect });
+        const request = () => fetch(`${baseUrl}/api/admin/orders/00000000-0000-4000-8000-000000000105/payment-verification`, {
+          method: "POST", signal: AbortSignal.timeout(5000),
+          headers: { Cookie: `fr_admin_session=${"a".repeat(48)}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ decision: "PAID", verifiedTransactionReference: "synthetic-concurrent-reference" }),
+        });
+        const responses = await Promise.all([request(), request()]);
+        assert.deepEqual(responses.map((response) => response.status), fault === "23505" ? [409, 409]
+          : fault ? [500, 500] : [200, 200]);
+        await Promise.all(responses.map((response) => response.body?.cancel()));
+        assert.equal(released, 2);
+        assert.equal(committedUpdates, fault ? 0 : 2, "Successful retries commit only one payment/order mutation pair");
+        assert.equal(state.payment_status, fault ? "PENDING_VERIFICATION" : "PAID");
+        assert.equal(state.order_status, fault ? "PENDING_PAYMENT" : "PLACED");
+      });
+    }
+  } finally {
+    Object.defineProperty(database, "connect", { configurable: true, value: originalConnect });
+    Object.defineProperty(database, "query", { configurable: true, value: originalQuery });
+    console.error = originalError;
+  }
+});
+
 test("manual verification is idempotent and late receipts only enter reconciliation", async () => {
   const originalConnect = database.connect.bind(database);
   const originalQuery = database.query.bind(database);

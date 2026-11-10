@@ -1,9 +1,42 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Client } from "pg";
-import { buildDatabaseConfig } from "./databaseConfig";
+import { Client, type ClientBase } from "pg";
+import { buildDatabaseConfig, initializeIntegrationSession } from "./databaseConfig";
 
 const databaseUrl = "postgres://fixture:unused@db.example.invalid:5432/fixture";
+
+test("integration pool sessions apply and verify limits before initialization completes", async () => {
+  const statements: string[] = [];
+  let complete!: () => void;
+  const configured = new Promise<void>((done) => { complete = done; });
+  let initialized = false;
+  const client = { query: async (sql: string) => {
+    statements.push(sql);
+    if (sql.includes("set_config")) { await configured; return { rows: [] }; }
+    return { rows: [{ statement: "12s", lock: "5s", idle: "10s" }] };
+  } } as unknown as ClientBase;
+  const config = buildDatabaseConfig({ DATABASE_URL: databaseUrl, INTEGRATION_DATABASE_SAFETY_LIMITS: "enabled" });
+  const pending = Promise.resolve(config.onConnect!(client)).then(() => { initialized = true; });
+  await Promise.resolve();
+  assert.equal(initialized, false);
+  assert.equal(statements.length, 1);
+  complete(); await pending;
+  assert.equal(statements.length, 2);
+  assert.ok(statements[1].includes("current_setting"));
+  assert.equal(buildDatabaseConfig({ DATABASE_URL: databaseUrl }).onConnect, undefined);
+});
+
+test("integration session initialization rejects unchanged pooler defaults and sanitizes failures", async () => {
+  for (const fails of [false, true]) {
+    const client = { query: async (sql: string) => {
+      if (fails) throw new Error("postgres://private:password@fixture token=secret");
+      return { rows: sql.includes("current_setting")
+        ? [{ statement: "2min", lock: "0", idle: "0" }] : [] };
+    } } as unknown as ClientBase;
+    await assert.rejects(initializeIntegrationSession(client),
+      { message: "Integration session timeout initialization/verification failed" });
+  }
+});
 test("development retains explicit local plaintext configuration", () => {
   assert.equal(buildDatabaseConfig({ DATABASE_URL: databaseUrl }).ssl, false);
 });
