@@ -176,6 +176,25 @@ test("authorized/failed payments stay pending and amount/currency/account/identi
   await assert.rejects(f.service.confirm(f.remotePayment()));
 });
 
+test("declined provider payment retries never confirm or publish an operational order", async () => {
+  const f = fixture();
+  await f.service.start(id, token);
+  f.remote({ status: "failed", captured: false });
+  const results = await Promise.all([
+    f.service.verify(id, token, "order_fixture", "pay_fixture", f.signature()),
+    f.service.confirm(f.remotePayment()),
+  ]);
+  assert.ok(results.every((result) => result.paymentStatus === "PENDING_PAYMENT"));
+  assert.equal(f.state().payment_status, "PENDING_PAYMENT");
+  assert.equal(f.state().recorded_payment_status, "PENDING_PAYMENT");
+  assert.equal(f.state().order_status, "PENDING_PAYMENT");
+  assert.equal(f.state().razorpay_payment_id, null);
+  assert.equal(f.counters().published, 0);
+  // Retry reuses the provider order; a decline does not create another local/provider order.
+  await f.service.start(id, token);
+  assert.equal(f.counters().creates, 1);
+});
+
 test("cancelled/expired captures are retained for reconciliation without placing orders", async () => {
   for (const status of ["CANCELLED", "EXPIRED"]) {
     const f = fixture(); await f.service.start(id, token); f.set({ payment_status: status, payment_attempt_active: false });

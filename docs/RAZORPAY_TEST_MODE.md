@@ -1,8 +1,10 @@
 # Razorpay Test Mode — local testing and migration review
 
-Status: application implementation only. No migrations, database writes, provider
-requests or real transactions were executed. Real Razorpay Checkout/webhook delivery
-is not yet verified. This is not live-payment support or production authorization.
+Status (14 November 2026): the user reports successful simulated Netbanking payment,
+Admin New Orders visibility and admin-to-customer status updates in the isolated
+testing project. A declined payment returned to the payment page and, per user
+report, stayed out of operational Admin Orders. These are manual Test Mode results,
+not live-money or production verification. Real webhook delivery remains untested.
 
 ## Isolated diagnostic startup
 
@@ -78,6 +80,12 @@ records/journals, and get separate migration authorization. No new schema is
 automatically created on build/startup. Manual UPI works without 016 when gateway
 mode is off; gateway endpoints return a schema-readiness error if needed.
 
+The user has supplied metadata showing 016 already present in the retained testing
+project, including a manually strengthened binding constraint that requires
+`razorpay_key_id IS NOT NULL`. The repository's 016 does not yet include that
+explicit null guard. Do not rerun 016; reconcile migration history through a
+separately reviewed migration/baseline decision before provisioning production.
+
 After approved application, read-only verification:
 
 ```sql
@@ -120,9 +128,10 @@ fail configuration validation. Explicit development/test NODE_ENV is required.
 Normal production must leave RAZORPAY_MODE unset/off. Do not set frontend secret
 variables or use integration-run approval variables to enable these endpoints.
 
-Current local inspection found the three requested variables present and a test-key
-prefix, but no webhook secret. Values were neither printed nor changed. Presence
-does not prove credentials are accepted by Razorpay.
+The dedicated ignored testing configuration contains Test Mode API credentials.
+The readiness review found no webhook secret in that file. No credential values
+are recorded here. Configure a separate webhook secret only through approved
+private setup; never use a live key or copy development credentials into tests.
 
 ## Manual simulated checkout — only after approval and isolated setup
 
@@ -171,12 +180,44 @@ Official references:
 - https://razorpay.com/docs/api/payments/fetch-with-id/
 - https://razorpay.com/docs/webhooks/validate-test/
 
-Verification results: backend npm test 112 passed, 0 failed, 0 skipped; backend
-build passed. Frontend lint/build passed. Focused mocked Playwright Checkout tests:
-6 passed, 0 failed (desktop, 390px, 375px). Full maintained Playwright suite and live
-Razorpay/database integration were not run. Git whitespace check passed, no unmerged
-paths. Local environment files are ignored/untracked; configured Razorpay secret
-values were not found in changed nonignored files. Branch main, changes uncommitted.
+See [the final testing and Git readiness review](RAZORPAY_TEST_READINESS_2026-11-14.md)
+for current counts, remaining database tests and the reviewed staging list. The
+implementation was already merged in PR #25; that review contains only follow-up
+tests/documentation. Full maintained Playwright and real database concurrency are
+not established by the focused mocked suite.
+
+## Actual Test Mode webhook delivery — separate approval required
+
+1. Approve the testing target, synthetic writes, webhook deliveries/replays and
+   public HTTPS exposure separately. Preserve existing financial records/journals.
+   Do not expose the entire local admin/API server through an unrestricted tunnel.
+2. Use a reviewed HTTPS staging endpoint or path-restricted tunnel forwarding only
+   `/api/razorpay/webhook` to the diagnostic backend. Localhost is not reachable
+   by Razorpay. Check the current provider URL restrictions; its documentation
+   lists several blocked tunnel domains and describes zrok as an option.
+3. In the Razorpay TEST dashboard, create a webhook for that URL and subscribe to
+   `payment.authorized`, `payment.captured`, `payment.failed` and `order.paid`.
+   Set a unique webhook secret and store it privately as
+   `RAZORPAY_WEBHOOK_SECRET` in `.env.razorpay-testing.local`; restart the one
+   diagnostic backend through the approved process. Never put the secret in a URL.
+4. After write approval, trigger a synthetic test transaction. Verify the dashboard
+   delivery receives 2xx. A synthetic sample event without a locally bound provider
+   order may correctly return 404; it does not prove order-confirmation behavior.
+5. Confirm independent backend provider fetch, captured amount/account/order binding,
+   one committed PAID/PLACED transition, test-only revenue and tracking/admin updates.
+   Authorized-only or failed provider state must not place an order.
+6. With separate replay/concurrency approval, repeat delivery and race it against
+   the callback. Confirm one confirmation, no duplicate revenue and no lifecycle
+   regression. The implementation uses row/state idempotency, not an event-ID ledger.
+7. Test invalid signatures with synthetic payloads: rejection and no mutation.
+   Never log raw signatures, payloads, provider IDs, customer data or secret values.
+8. Review dashboard failed deliveries; Razorpay can retry non-2xx and out-of-order
+   events. The handler fetches the latest payment state rather than trusting event
+   status alone. Disable the test webhook and close the tunnel after testing.
+
+Provider references checked for this plan:
+- [Webhook validation/testing](https://razorpay.com/docs/webhooks/validate-test/)
+- [Delivery/retry best practices](https://razorpay.com/docs/webhooks/best-practices/)
 
 ## Files changed
 
