@@ -4,11 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "tsx --test --test-concurrency=1 src/adminPassword.test.ts src/catalogEvents.test.ts src/restaurantSchedule.test.ts src/server.security.test.ts src/databaseConfig.test.ts tests/orderStatusEvents.test.ts tests/integrationTarget.test.ts tests/integrationSafety.test.ts",
+    "test": "tsx --test --test-concurrency=1 src/adminPassword.test.ts src/catalogEvents.test.ts src/restaurantSchedule.test.ts src/server.security.test.ts src/databaseConfig.test.ts src/razorpay.test.ts src/razorpayDiagnosticEnvironment.test.ts tests/orderStatusEvents.test.ts tests/integrationTarget.test.ts tests/integrationSafety.test.ts",
     "test:integration": "tsx tests/integrationRunner.ts run",
     "test:integration:preflight": "tsx tests/integrationRunner.ts preflight",
     "db:verify": "tsx src/verifyDatabaseConnection.ts",
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch src/startRazorpayDiagnostic.ts",
+    "dev:normal": "tsx watch src/server.ts",
     "admin:hash-password": "tsx src/generateAdminPasswordHash.ts",
     "build": "tsc",
     "start": "node dist/server.js"

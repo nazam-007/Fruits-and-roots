@@ -4,6 +4,9 @@ Fruits & Roots is a restaurant QR-ordering application with a customer menu and 
 
 ## Features
 
+Razorpay **Test Mode only** is optional. See [setup, safeguards and migration review](docs/RAZORPAY_TEST_MODE.md).
+It is disabled in production and requires separately approved testing migration 016.
+
 - Browse the menu, view product sizes and prices, and add items to a persistent cart.
 - Create pickup orders and continue to a separate payment page.
 - View order status using the customer order-tracking page.

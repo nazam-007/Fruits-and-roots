@@ -20,7 +20,7 @@ export type PaymentStatus =
   | "CANCELLED"
   | "EXPIRED";
 
-export type PaymentSource = "DEMO" | "MANUAL_UPI" | null;
+export type PaymentSource = "DEMO" | "MANUAL_UPI" | "RAZORPAY_TEST" | null;
 
 export type OrderLine = {
   productId: string;
@@ -52,6 +52,7 @@ export type OrderDetails = {
     qrCodeDataUrl: string;
   } | null;
   demoPaymentsEnabled?: boolean;
+  razorpayTestEnabled?: boolean;
 };
 
 export type PaymentQuote = {
@@ -97,6 +98,7 @@ export async function fetchPaymentConfiguration(): Promise<{
   merchantName?: string;
   currency?: "INR";
   demoPaymentsEnabled: boolean;
+  razorpayTestEnabled?: boolean;
 }> {
   return readResponse(
     await fetch(`${API_URL}/api/payment-config`),

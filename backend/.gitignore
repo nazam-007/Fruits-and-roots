@@ -4,5 +4,6 @@ dist/
 .env.example
 !.env.example
 .env.integration.local
+.env.razorpay-testing.local
 certs/
 integration-artifacts/

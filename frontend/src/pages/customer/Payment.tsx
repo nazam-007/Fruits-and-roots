@@ -19,6 +19,8 @@ import {
   submitManualPaymentClaim,
 } from "../../services/paymentsApi";
 
+import { openRazorpayTestCheckout } from "../../services/razorpayCheckout";
+
 const IDEMPOTENCY_STORAGE_KEY = "fruits-roots-payment-idempotency";
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
 
@@ -148,6 +150,32 @@ export default function Payment() {
     }
   };
 
+  const handleRazorpayPayment = async () => {
+    if (submittingRef.current || !orderId || !trackingToken) return;
+    submittingRef.current = true;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await openRazorpayTestCheckout(orderId, trackingToken);
+      if (result?.paymentStatus === "PAID") {
+        window.sessionStorage.removeItem(IDEMPOTENCY_STORAGE_KEY);
+        clearCart(); clearCheckoutDetails();
+        navigate(`/order/${orderId}`, { replace: true });
+      } else {
+        await refreshOrder();
+        setError(result?.reconciliationRequired ? "Test payment needs reconciliation; the order was not placed."
+          : result ? "Payment is pending capture. Refresh status shortly."
+          : "Test Checkout closed or payment failed. No payment confirmation was assumed. You can retry.");
+      }
+    } catch (requestError) {
+      await refreshOrder();
+      setError(requestError instanceof Error ? requestError.message : "Unable to verify test payment. Refresh status before retrying.");
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
   const handleManualClaim = async () => {
     if (
       submittingRef.current ||
@@ -215,6 +243,7 @@ export default function Payment() {
   const paymentIsPending =
     order.paymentStatus === "PENDING_PAYMENT" &&
     order.orderStatus !== "CANCELLED";
+  const razorpayOnly = order.razorpayTestEnabled === true && !paymentDetails && paymentIsPending;
   const paymentCanBeCancelled = [
     "PENDING_PAYMENT",
     "PENDING_VERIFICATION",
@@ -302,7 +331,7 @@ export default function Payment() {
         <section className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-4 shadow-[0_8px_30px_-25px_rgba(30,51,35,0.5)] sm:p-6">
           <div className="mb-5">
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#b56b36]">
-              UPI payment
+              {order.paymentSource === "RAZORPAY_TEST" || razorpayOnly ? "Razorpay test payment" : "UPI payment"}
             </p>
             <h2 className="break-all font-serif text-xl font-semibold text-[#253b2a] sm:text-2xl">
               Order {order.orderNumber}
@@ -320,7 +349,18 @@ export default function Payment() {
             )}
           </div>
 
-          {paymentDetails ? (
+          {order.razorpayTestEnabled && paymentIsPending && (
+            <div className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-4">
+              <p className="text-sm font-semibold">Razorpay TEST MODE — simulated payment, no real money.</p>
+              <button type="button" disabled={submitting} onClick={() => void handleRazorpayPayment()}
+                className="mt-3 min-h-12 w-full rounded-full bg-[#31573a] px-5 py-3 font-semibold text-white disabled:opacity-50">
+                {submitting ? "Waiting for test payment..." : "Pay with Razorpay Test Checkout"}
+              </button>
+            </div>
+          )}
+          {order.paymentSource === "RAZORPAY_TEST" ? (
+            <p className="rounded-xl bg-amber-50 p-4 text-sm">This checkout uses Razorpay Test Mode. Refresh status after payment; use a new checkout to switch to manual UPI.</p>
+          ) : paymentDetails ? (
             <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_minmax(220px,280px)] sm:items-center">
               <div className="space-y-3 text-sm">
                 <p className="text-[#73796d]">
@@ -383,13 +423,17 @@ export default function Payment() {
                 </p>
               </div>
             </div>
+          ) : razorpayOnly ? (
+            <p className="rounded-xl bg-amber-50 p-4 text-sm">
+              Manual UPI is unavailable. Use Razorpay Test Checkout above; no real payment is required.
+            </p>
           ) : (
             <p role="alert" className="rounded-xl bg-[#fff2ee] p-4 text-sm text-[#984734]">
               Payment configuration is unavailable. No QR code was generated.
             </p>
           )}
 
-          {order.demoPaymentsEnabled ? (
+          {order.paymentSource === "RAZORPAY_TEST" || razorpayOnly ? null : order.demoPaymentsEnabled ? (
             paymentIsPending ? (
               <div className="mt-6 border-t border-[#eeece4] pt-5">
                 <p className="text-sm leading-6 text-[#596554]">

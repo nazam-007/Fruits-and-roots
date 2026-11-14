@@ -3,6 +3,7 @@ import { Router, type RequestHandler } from "express";
 import QRCode from "qrcode";
 import { z } from "zod";
 import { db } from "../db";
+import { razorpayTestEnabled } from "../razorpay";
 import {
   getRestaurantAvailability,
   openingHoursSchema,
@@ -362,6 +363,7 @@ router.get("/payment-config", (_req, res) => {
     res.json({
       configured: false,
       demoPaymentsEnabled: demoPaymentsEnabled(),
+      razorpayTestEnabled: razorpayTestEnabled(),
     });
     return;
   }
@@ -372,6 +374,7 @@ router.get("/payment-config", (_req, res) => {
     merchantName: config.merchantName,
     currency: "INR",
     demoPaymentsEnabled: demoPaymentsEnabled(),
+      razorpayTestEnabled: razorpayTestEnabled(),
   });
 });
 
@@ -485,7 +488,7 @@ router.post("/orders", limitOrders, async (req, res) => {
     res.status(400).json({ message: "Each product size may only appear once." });
     return;
   }
-  if (!getMerchantConfig()) {
+  if (!getMerchantConfig() && !razorpayTestEnabled()) {
     res.status(503).json({ message: "UPI payment is not configured." });
     return;
   }
@@ -805,10 +808,20 @@ router.post(
         [orderIdResult.data],
       );
       const order = orderResult.rows[0];
+
       if (!order || !hashesMatch(order.tracking_token_hash, hash(token))) {
         await client.query("ROLLBACK");
         res.status(404).json({ message: "Order not found." });
         return;
+      }
+
+      if (order) {
+        const source = (await client.query("SELECT payment_source FROM payments WHERE order_id=$1", [order.id])).rows[0]?.payment_source;
+        if (source === "RAZORPAY_TEST") {
+          await client.query("ROLLBACK");
+          res.status(409).json({ message: "This attempt uses Razorpay Test Checkout" });
+          return;
+        }
       }
 
       if (order.payment_status === "PAID") {
@@ -967,6 +980,11 @@ router.post("/orders/:orderId/payment-claim", limitOrders, async (req, res) => {
       );
       await client.query("COMMIT");
       res.status(410).json({ message: "This payment attempt has expired." });
+      return;
+    }
+    if (order.payment_source && order.payment_source !== "MANUAL_UPI") {
+      await client.query("ROLLBACK");
+      res.status(409).json({ message: "This attempt uses another payment provider. Start a new checkout to use manual UPI." });
       return;
     }
     if (order.order_status === "CANCELLED") {
@@ -1230,6 +1248,7 @@ router.get("/orders/:orderId", limitTracking, async (req, res) => {
     }
     const paymentDetails =
       order.payment_status === "PENDING_PAYMENT" &&
+      order.payment_source !== "RAZORPAY_TEST" &&
       order.order_status !== "CANCELLED"
         ? await createPaymentDetails(Number(order.total_amount))
         : null;
@@ -1237,6 +1256,7 @@ router.get("/orders/:orderId", limitTracking, async (req, res) => {
       ...toOrderResponse(order),
       paymentDetails,
       demoPaymentsEnabled: demoPaymentsEnabled(),
+      razorpayTestEnabled: razorpayTestEnabled(),
     });
   } catch {
     res.status(500).json({ message: "Unable to load order status." });

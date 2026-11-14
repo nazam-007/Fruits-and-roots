@@ -16,7 +16,7 @@ export type AdminPaymentStatus =
   | "CANCELLED"
   | "EXPIRED";
 export type AdminOrderLifecycleStatus = AdminOrderStatus | "PENDING_PAYMENT";
-export type AdminPaymentSource = "DEMO" | "MANUAL_UPI" | null;
+export type AdminPaymentSource = "DEMO" | "MANUAL_UPI" | "RAZORPAY_TEST" | null;
 
 export type AdminOrderRow = {
   id: string;
@@ -59,6 +59,7 @@ export type AdminOrderDetails = AdminOrderRow & {
     unitPrice: number;
   }>;
   demoPaymentsEnabled: boolean;
+  razorpayTestEnabled?: boolean;
 };
 
 export type AdminDashboardData = {
@@ -74,6 +75,7 @@ export type AdminDashboardData = {
     demo_revenue_today: number;
   };
   demoPaymentsEnabled: boolean;
+  razorpayTestEnabled?: boolean;
 };
 
 export type AdminRestaurantSettings = RestaurantOrderingStatus;
