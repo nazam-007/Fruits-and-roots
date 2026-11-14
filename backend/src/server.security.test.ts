@@ -20,6 +20,7 @@ const openAllWeek: OpeningHours = {
 process.env.DATABASE_URL = "postgres://security-test:security-test@127.0.0.1:5432/security_test";
 process.env.FRONTEND_ORIGIN = "http://localhost:5173";
 process.env.NODE_ENV = "test";
+process.env.RAZORPAY_MODE = "off";
 process.env.TRUSTED_PROXY_IPS = "";
 process.env.ADMIN_USERNAME = "security-test";
 process.env.ADMIN_PASSWORD_HASH = createAdminPasswordHash(longTestPassword);
@@ -30,6 +31,147 @@ process.env.ORDER_TRACKING_SECRET = "t".repeat(32);
 let server: Server;
 let baseUrl: string;
 let database: Pool;
+
+test("checkout permits valid Razorpay test configuration without UPI and preserves manual payment gates", async (t) => {
+  const { app } = await import("./server.js");
+  const oldTrustProxy = app.get("trust proxy");
+  app.set("trust proxy", ["loopback"]);
+  let requestNumber = 0;
+  const keys = ["MERCHANT_UPI_ID", "MERCHANT_UPI_NAME", "RAZORPAY_MODE", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "NODE_ENV", "ORDER_TRACKING_SECRET"];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const oldConnect = database.connect;
+  const oldQuery = database.query;
+  const statements: string[] = [];
+  const id = "00000000-0000-4000-8000-000000000291";
+  const item = { product_id: "fixture-juice", product_name: "Fixture Juice", available: true, size: "Regular", price: 120 };
+  const order = { id, order_number: "FR-FIXTURE", customer_name: "Synthetic", fulfillment_type: "PICKUP",
+    order_type: "TAKEAWAY", table_number: null, total_amount: 120, payment_status: "PENDING_PAYMENT",
+    payment_source: "MANUAL_UPI", order_status: "PENDING_PAYMENT", created_at: new Date(), items: [] };
+  let accepting = true;
+  const client = { query: async (sql: string) => {
+    statements.push(sql);
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+    if (sql.includes("FROM orders WHERE idempotency_key")) return { rows: [] };
+    if (sql.includes("FROM public.restaurant_settings")) return { rows: [{ accepting_orders: accepting, opening_hours: openAllWeek }] };
+    if (sql.includes("FROM products p")) return { rows: [item] };
+    if (sql.includes("INSERT INTO orders")) return { rows: [{ id }] };
+    if (sql.includes("INSERT INTO order_items") || sql.includes("INSERT INTO payments")) return { rows: [] };
+    throw Error("Unexpected fixture query");
+  }, release: () => {} };
+  database.connect = (async () => client) as unknown as Pool["connect"];
+  database.query = (async () => ({ rows: [order] })) as unknown as Pool["query"];
+  const submit = () => fetch(`${baseUrl}/api/orders`, { method: "POST", headers: {
+    "Content-Type": "application/json", "X-Forwarded-For": `198.51.100.${++requestNumber}` },
+    body: JSON.stringify({ customerName: "Synthetic", orderType: "TAKEAWAY", items: [{ productId: item.product_id, size: "Regular", quantity: 1 }],
+      idempotencyKey: "00000000-0000-4000-8000-000000000292" }) });
+  try {
+    delete process.env.MERCHANT_UPI_ID;
+    delete process.env.MERCHANT_UPI_NAME;
+    process.env.RAZORPAY_MODE = "test";
+    process.env.RAZORPAY_KEY_ID = "rzp_test_fixture";
+    process.env.RAZORPAY_KEY_SECRET = "fixture-only";
+    await t.test("test-only checkout remains pending with server prices", async () => {
+      const response = await submit();
+      assert.equal(response.status, 201);
+      const result = await response.json();
+      assert.equal(result.paymentStatus, "PENDING_PAYMENT");
+      assert.equal(result.orderStatus, "PENDING_PAYMENT");
+      assert.equal(result.totalAmount, 120);
+      assert.equal(typeof result.trackingToken, "string");
+      assert.ok(statements.some((sql) => sql.includes("'PENDING_PAYMENT', 'PENDING_PAYMENT'")));
+      assert.ok(statements.some((sql) => sql.includes("INSERT INTO payments") && sql.includes("'PENDING_PAYMENT'")));
+      assert.ok(statements.every((sql) => !sql.includes("'PAID'")));
+      const config = await (await fetch(`${baseUrl}/api/payment-config`)).json();
+      assert.equal(config.configured, false); // Still describes manual UPI only.
+      assert.equal(config.razorpayTestEnabled, true);
+      assert.equal(config.upiId, undefined);
+    });
+    await t.test("restaurant pause remains enforced without UPI", async () => {
+      accepting = false;
+      const response = await submit();
+      assert.equal(response.status, 409);
+      assert.equal((await response.json()).code, "ORDERS_PAUSED");
+      accepting = true;
+    });
+    await t.test("secure tracking remains required", async () => {
+      process.env.ORDER_TRACKING_SECRET = "";
+      const before = statements.length;
+      const response = await submit();
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).message, "Secure order tracking is not configured.");
+      assert.equal(statements.length, before);
+      process.env.ORDER_TRACKING_SECRET = saved.ORDER_TRACKING_SECRET;
+    });
+    await t.test("manual-only mode still requires UPI", async () => {
+      process.env.RAZORPAY_MODE = "off";
+      const before = statements.length;
+      const response = await submit();
+      assert.equal(response.status, 503);
+      assert.equal((await response.json()).message, "UPI payment is not configured.");
+      assert.equal(statements.length, before);
+    });
+    await t.test("production cannot use test mode to bypass missing UPI", async () => {
+      process.env.RAZORPAY_MODE = "test";
+      process.env.NODE_ENV = "production";
+      const before = statements.length;
+      assert.equal((await submit()).status, 503);
+      assert.equal(statements.length, before);
+      process.env.NODE_ENV = "test";
+    });
+    await t.test("configured manual checkout remains supported", async () => {
+      process.env.RAZORPAY_MODE = "off";
+      process.env.MERCHANT_UPI_ID = saved.MERCHANT_UPI_ID;
+      process.env.MERCHANT_UPI_NAME = saved.MERCHANT_UPI_NAME;
+      assert.equal((await submit()).status, 201);
+    });
+  } finally {
+    app.set("trust proxy", oldTrustProxy);
+    database.connect = oldConnect;
+    database.query = oldQuery;
+    for (const key of keys) { if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key]; }
+  }
+});
+
+test("Razorpay failure diagnostics preserve HTTP responses without database or provider access", async () => {
+  const oldConnect = database.connect;
+  const oldError = console.error;
+  const saved = { mode: process.env.RAZORPAY_MODE, key: process.env.RAZORPAY_KEY_ID, secret: process.env.RAZORPAY_KEY_SECRET };
+  const lines: string[] = [];
+  process.env.RAZORPAY_MODE = "test";
+  process.env.RAZORPAY_KEY_ID = "rzp_test_fixture";
+  process.env.RAZORPAY_KEY_SECRET = "fixture-only";
+  console.error = (line: string) => { lines.push(line); };
+  try {
+    for (const [code, status, message] of [
+      ["42703", 503, "Razorpay testing schema is not ready; review migration 016"],
+      ["23514", 503, "Razorpay testing schema is not ready; review migration 016"],
+      ["23505", 409, "Payment identity already recorded"],
+      ["42501", 503, "Unable to process Razorpay test payment; retry safely"],
+      ["private-code", 503, "Unable to process Razorpay test payment; retry safely"],
+    ] as const) {
+      database.connect = (async () => { throw { code, message: "private-data", constraint: "payments_source_check" }; }) as unknown as Pool["connect"];
+      const response = await fetch(`${baseUrl}/api/orders/00000000-0000-4000-8000-000000000201/razorpay/order`, {
+        method: "POST", headers: { Authorization: `Bearer ${"t".repeat(48)}` },
+      });
+      assert.equal(response.status, status);
+      assert.deepEqual(await response.json(), { message });
+      assert.equal(JSON.parse(lines.at(-1)!).stage, "razorpay_database_transaction");
+    }
+    console.error = () => { throw Error("logger unavailable"); };
+    const response = await fetch(`${baseUrl}/api/orders/00000000-0000-4000-8000-000000000201/razorpay/order`, {
+      method: "POST", headers: { Authorization: `Bearer ${"t".repeat(48)}` },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(lines.join("").includes("private-data"), false);
+    assert.equal(lines.join("").includes("private-code"), false);
+  } finally {
+    database.connect = oldConnect;
+    console.error = oldError;
+    for (const [name, value] of Object.entries({ RAZORPAY_MODE: saved.mode, RAZORPAY_KEY_ID: saved.key, RAZORPAY_KEY_SECRET: saved.secret })) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  }
+});
 
 before(async () => {
   const [{ app }, { db }] = await Promise.all([
@@ -81,6 +223,38 @@ test("unauthenticated admin APIs and image uploads are rejected", async (t) => {
       const response = await fetch(`${baseUrl}${path}`, { method });
       assert.equal(response.status, 401);
     });
+  }
+});
+
+test("Razorpay webhook validates exact raw bytes and production endpoints stay disabled", async () => {
+  const names = ["NODE_ENV", "RAZORPAY_MODE", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"];
+  const original = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  try {
+    process.env.NODE_ENV = "test";
+    process.env.RAZORPAY_MODE = "test";
+    process.env.RAZORPAY_KEY_ID = "rzp_test_fixture";
+    process.env.RAZORPAY_KEY_SECRET = "fixture-secret";
+    process.env.RAZORPAY_WEBHOOK_SECRET = "webhook-fixture";
+    const raw = '{ "event": "unsupported.fixture" }';
+    const signature = createHmac("sha256", "webhook-fixture").update(raw).digest("hex");
+    const send = (body: string, value: string) => fetch(`${baseUrl}/api/razorpay/webhook`, {
+      method: "POST", headers: { "Content-Type": "application/json", "x-razorpay-signature": value }, body,
+    });
+    assert.equal((await send(raw, "0".repeat(64))).status, 400);
+    assert.equal((await send(JSON.stringify(JSON.parse(raw)), signature)).status, 400);
+    const valid = await send(raw, signature);
+    assert.equal(valid.status, 200);
+    assert.equal((await valid.json()).ignored, true);
+    process.env.NODE_ENV = "production";
+    assert.equal((await send(raw, signature)).status, 404);
+    for (const endpoint of ["order", "verify"]) {
+      const response = await fetch(`${baseUrl}/api/orders/00000000-0000-4000-8000-000000000201/razorpay/${endpoint}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+      });
+      assert.equal(response.status, 404);
+    }
+  } finally {
+    for (const name of names) { if (original[name] === undefined) delete process.env[name]; else process.env[name] = original[name]; }
   }
 });
 

@@ -7,8 +7,11 @@ import { db } from "./db";
 import menuRoutes from "./routes/menu";
 import orderRoutes from "./routes/orders";
 import adminRoutes from "./routes/admin";
+import razorpayRoutes, { razorpayWebhook } from "./routes/razorpay";
+import { razorpayConfig } from "./razorpay";
 import { startPendingPaymentExpiryWorker } from "./paymentExpiry";
 
+razorpayConfig(); // Fail closed for live keys or test mode in production.
 const app = express();
 
 const PORT = Number(process.env.PORT || 5000);
@@ -61,7 +64,9 @@ app.use(
   })
 );
 
+app.post("/api/razorpay/webhook", express.raw({ type: "application/json", limit: "256kb" }), razorpayWebhook);
 app.use(express.json({ limit: "6mb" }));
+app.use("/api", razorpayRoutes);
 
 // Home route
 app.get("/", (_req, res) => {

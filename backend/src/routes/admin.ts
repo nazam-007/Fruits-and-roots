@@ -12,6 +12,7 @@ import {
   verifyAdminPassword,
 } from "../adminPassword";
 import { db } from "../db";
+import { razorpayTestEnabled } from "../razorpay";
 import { operationalPaymentPredicate } from "../operationalOrders";
 import { publishOrderStatus } from "../orderStatusEvents";
 import { publishRestaurantStatusChange } from "../catalogEvents";
@@ -376,7 +377,7 @@ router.get("/dashboard", async (_req, res) => {
                SELECT 1 FROM payments p
                WHERE p.order_id = o.id
                  AND p.payment_status = 'PAID'
-                 AND p.payment_source = 'DEMO'
+                 AND p.payment_source IN ('DEMO', 'RAZORPAY_TEST')
              )
          ), 0)::bigint AS demo_revenue_today
        FROM local_day
@@ -386,6 +387,7 @@ router.get("/dashboard", async (_req, res) => {
     res.json({
       summary: summary.rows[0],
       demoPaymentsEnabled: isDemoMode(),
+      razorpayTestEnabled: razorpayTestEnabled(),
     });
   } catch (error) {
     console.error("Admin dashboard query failed", {
@@ -611,7 +613,7 @@ router.get("/orders/:orderId", async (req, res) => {
       res.status(404).json({ message: "Order not found." });
       return;
     }
-    res.json({ ...result.rows[0], demoPaymentsEnabled: isDemoMode() });
+    res.json({ ...result.rows[0], demoPaymentsEnabled: isDemoMode(), razorpayTestEnabled: razorpayTestEnabled() });
   } catch (error) {
     console.error("Admin order details query failed", {
       code: (error as { code?: string }).code,
@@ -668,7 +670,8 @@ router.patch("/orders/:orderId/status", async (req, res) => {
       const paidByAllowedSource =
         order.payment_status === "PAID" &&
         (order.payment_source === "MANUAL_UPI" ||
-          (order.payment_source === "DEMO" && isDemoMode()));
+          (order.payment_source === "DEMO" && isDemoMode()) ||
+          (order.payment_source === "RAZORPAY_TEST" && razorpayTestEnabled()));
       if (!paidByAllowedSource) {
         await client.query("ROLLBACK");
         res.status(409).json({

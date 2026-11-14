@@ -169,7 +169,8 @@ export default function AdminOrderDetails() {
   const canStartPreparation =
     order.payment_status === "PAID" &&
     (order.payment_source === "MANUAL_UPI" ||
-      (order.payment_source === "DEMO" && order.demoPaymentsEnabled));
+      (order.payment_source === "DEMO" && order.demoPaymentsEnabled) ||
+      (order.payment_source === "RAZORPAY_TEST" && order.razorpayTestEnabled));
   const canVerifyPayment =
     order.payment_status === "PENDING_VERIFICATION" &&
     order.recorded_payment_status === "PENDING_VERIFICATION" &&
@@ -303,7 +304,7 @@ export default function AdminOrderDetails() {
               </div>
             </div>
           )}
-          {order.payment_source === "DEMO" && (
+          {(order.payment_source === "DEMO" || order.payment_source === "RAZORPAY_TEST") && (
             <p className="mt-4 rounded-xl bg-amber-50 p-3 text-xs leading-5 text-amber-900">
               DEMO PAYMENT — this is not real revenue and is not eligible for manual bank verification.
             </p>

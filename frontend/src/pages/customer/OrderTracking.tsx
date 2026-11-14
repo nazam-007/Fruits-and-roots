@@ -345,12 +345,12 @@ export default function OrderTracking() {
               id="payment-status-heading"
               className="font-semibold text-[#253b2a]"
             >
-              {order.paymentSource === "DEMO" && order.paymentStatus === "PAID"
+              {(order.paymentSource === "DEMO" || order.paymentSource === "RAZORPAY_TEST") && order.paymentStatus === "PAID"
                 ? "Demo Paid"
                 : paymentStatusLabels[order.paymentStatus]}
             </h2>
             <p role="status" aria-live="polite" className="mt-1 text-sm leading-6 text-[#6d7468]">
-              {order.paymentSource === "DEMO" &&
+              {(order.paymentSource === "DEMO" || order.paymentSource === "RAZORPAY_TEST") &&
               order.paymentStatus === "PAID" ? (
                 <>
                   Your demo order has been placed successfully! The merchant
