@@ -1,26 +1,28 @@
 import { expect, test } from "@playwright/test";
 
-for (const dismiss of [false, true]) {
-  test(`Razorpay test checkout ${dismiss ? "dismissal never confirms" : "uses backend amount and verifies before tracking"}`, async ({ page }) => {
+for (const scenario of ["success", "dismiss", "decline"] as const) {
+  test(`Razorpay test checkout ${scenario === "success" ? "uses backend amount and verifies before tracking" : `${scenario} never confirms`}`, async ({ page }) => {
     const id = "00000000-0000-4000-8000-000000000201";
     let verified = 0;
     let paid = false;
-    await page.addInitScript(({ id, dismiss }) => {
+    await page.addInitScript(({ id, scenario }) => {
       sessionStorage.setItem(`fruits-roots-order-token:${id}`, "fixture-tracking-token");
       Object.defineProperty(window, "Razorpay", { value: class {
+        private failed?: () => void;
         constructor(private options: { key: string; amount: number; order_id: string;
           handler: (response: Record<string, string>) => void; modal: { ondismiss: () => void } }) {}
         open() {
           if (this.options.key !== "rzp_test_fixture" || this.options.amount !== 24000 || this.options.order_id !== "order_fixture") {
             throw new Error("Incorrect Checkout configuration");
           }
-          if (dismiss) this.options.modal.ondismiss();
+          if (scenario === "dismiss") this.options.modal.ondismiss();
+          else if (scenario === "decline") this.failed?.();
           else this.options.handler({ razorpay_order_id: "order_fixture", razorpay_payment_id: "pay_fixture", razorpay_signature: "a".repeat(64) });
         }
         close() {}
-        on() {}
+        on(event: string, handler: () => void) { if (event === "payment.failed") this.failed = handler; }
       } });
-    }, { id, dismiss });
+    }, { id, scenario });
     await page.route(`**/api/orders/${id}`, (route) => route.fulfill({ json: {
       orderId: id, orderNumber: "TEST-201", customerName: "Synthetic", fulfillmentType: "PICKUP", tableNumber: null,
       totalAmount: 240, paymentStatus: paid ? "PAID" : "PENDING_PAYMENT", paymentSource: "RAZORPAY_TEST",
@@ -39,7 +41,7 @@ for (const dismiss of [false, true]) {
     });
     await page.goto(`/payment/${id}`);
     await page.getByRole("button", { name: "Pay with Razorpay Test Checkout" }).click();
-    if (dismiss) {
+    if (scenario !== "success") {
       await expect(page.getByRole("alert")).toContainText("No payment confirmation was assumed");
       expect(verified).toBe(0);
       await expect(page).toHaveURL(new RegExp(`/payment/${id}$`));
