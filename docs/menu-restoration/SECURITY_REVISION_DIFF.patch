@@ -1,0 +1,328 @@
+--- a/backend/src/startMenuPreview.ts
++++ b/backend/src/startMenuPreview.ts
+@@ -2,6 +2,7 @@
+ import { Pool } from "pg";
+ import { buildDatabaseConfig } from "./databaseConfig";
+ import { createPreviewApp } from "./previewMenu";
++import { assertPreviewPrivileges, previewRelationsSql, previewCapabilitiesSql } from "./previewPrivileges";
+ 
+ async function main() {
+  const url=new URL(process.env.DATABASE_URL || "");
+@@ -17,20 +18,11 @@
+  try {
+  const socket=(client as unknown as {connection:{stream:{encrypted?:boolean;authorized?:boolean}}}).connection.stream;
+  if(!socket.encrypted||!socket.authorized) throw Error();
+- const role=(await client.query(`SELECT current_user AS name,rolsuper,rolbypassrls,rolcreatedb,rolcreaterole,
++ const role=(await client.query(`SELECT current_user AS name,rolcanlogin,rolinherit,rolsuper,rolbypassrls,rolcreatedb,rolcreaterole,rolreplication,
+  current_setting('default_transaction_read_only') AS read_only FROM pg_roles WHERE rolname=current_user`)).rows[0];
+- if(role?.name!=="fruits_roots_menu_preview"||role.rolsuper||role.rolbypassrls||role.rolcreatedb||role.rolcreaterole||role.read_only!=="on") throw Error();
+- const excess=(await client.query(`SELECT EXISTS (
+- SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+- WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f') AND (
+- has_table_privilege(current_user,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+- OR has_any_column_privilege(current_user,c.oid,'INSERT,UPDATE,REFERENCES')
+- OR (c.relname NOT IN ('categories','products','product_variants') AND has_any_column_privilege(current_user,c.oid,'SELECT')))) AS excess`)).rows[0];
+- if(excess?.excess!==false) throw Error();
+- for(const table of ["categories","products","product_variants"]){
+- const result=await client.query("SELECT has_table_privilege(current_user,$1,'SELECT') AS allowed",[`public.${table}`]);
+- if(result.rows[0]?.allowed!==true)throw Error();
+- }
++ const relations=(await client.query(previewRelationsSql)).rows;
++ const capabilities=(await client.query(previewCapabilitiesSql)).rows[0];
++ assertPreviewPrivileges(role || {},relations,capabilities || {});
+  } finally {client.release();}
+  const app=createPreviewApp((sql,params)=>pool.query(sql,params),origin);
+  const server=app.listen(Number(process.env.PORT||5000),"0.0.0.0");
+--- a/backend/src/previewMenu.test.ts
++++ b/backend/src/previewMenu.test.ts
+@@ -26,3 +26,58 @@
+  const app=createPreviewApp(async()=>{throw Error("private database details");},"https://preview.example"); const server=app.listen(0,"127.0.0.1");await new Promise<void>(r=>server.once("listening",r));
+  try{const response=await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/menu`);assert.equal(response.status,503);assert.deepEqual(await response.json(),{message:"Menu preview unavailable"});}finally{server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));}
+ });
++
++import { assertPreviewPrivileges, forbiddenPreviewRelation, previewRelationsSql, previewCapabilitiesSql, type PreviewRelation } from "./previewPrivileges";
++const safeRole = {name:"fruits_roots_menu_preview",read_only:"on",rolcanlogin:true,
++ rolinherit:false,rolsuper:false,rolbypassrls:false,rolcreatedb:false,rolcreaterole:false,rolreplication:false};
++const safeCapabilities = {memberships:false,database_create:false,schema_create:false,sequence_grant:false,reachable_definer:false};
++const menuRelations: PreviewRelation[] = ["categories","products","product_variants"].map(relation_name=>({schema_name:"public",relation_name,schema_usage:true,can_read:true,table_mutation:false,column_mutation:false}));
++const extensionView: PreviewRelation = {schema_name:"extensions",relation_name:"pg_stat_statements",schema_usage:false,can_read:true,table_mutation:false,column_mutation:false};
++test("inaccessible PUBLIC SELECT on extension view is tolerated without granting schema access",()=>{
++ assert.equal(forbiddenPreviewRelation(extensionView),false);
++ assert.doesNotThrow(()=>assertPreviewPrivileges(safeRole,[...menuRelations,extensionView],safeCapabilities));
++});
++test("schema USAGE makes cross-schema SELECT reachable and forbidden",()=>{
++ assert.throws(()=>assertPreviewPrivileges(safeRole,[...menuRelations,{...extensionView,schema_usage:true}],safeCapabilities));
++});
++test("unexpected mutation grants fail even without schema USAGE",()=>{
++ for(const field of ["table_mutation","column_mutation"]){
++ assert.throws(()=>assertPreviewPrivileges(safeRole,[...menuRelations,{...extensionView,[field]:true}],safeCapabilities));
++ }
++});
++test("menu SELECT requires schema USAGE and all three menu relations",()=>{
++ assert.throws(()=>assertPreviewPrivileges(safeRole,menuRelations.slice(1),safeCapabilities));
++ assert.throws(()=>assertPreviewPrivileges(safeRole,menuRelations.map(row=>({...row,schema_usage:false})),safeCapabilities));
++});
++test("financial or session reads in public and other schemas are forbidden",()=>{
++ for(const schema_name of ["public","private"]){for(const relation_name of ["orders","payments","customers","admin_sessions"]){
++ assert.throws(()=>assertPreviewPrivileges(safeRole,[...menuRelations,{...extensionView,schema_name,relation_name,schema_usage:true}],safeCapabilities));
++ }}
++});
++test("NOINHERIT alone is insufficient: memberships and members are rejected",()=>{
++ assert.throws(()=>assertPreviewPrivileges(safeRole,menuRelations,{...safeCapabilities,memberships:true}));
++ assert.throws(()=>assertPreviewPrivileges({...safeRole,rolinherit:true},menuRelations,safeCapabilities));
++});
++test("elevated flags, sequence access, CREATE and reachable definers fail closed",()=>{
++ for(const flag of ["rolsuper","rolbypassrls","rolcreatedb","rolcreaterole","rolreplication"]){
++ assert.throws(()=>assertPreviewPrivileges({...safeRole,[flag]:true},menuRelations,safeCapabilities));}
++ for(const flag of ["database_create","schema_create","sequence_grant","reachable_definer"]){
++ assert.throws(()=>assertPreviewPrivileges(safeRole,menuRelations,{...safeCapabilities,[flag]:true}));}
++});
++test("MAINTAIN and sequence privileges are included in actual metadata SQL",()=>{
++ assert.match(previewRelationsSql,/TRUNCATE,MAINTAIN,REFERENCES/);
++ assert.match(previewRelationsSql,/has_schema_privilege\(current_user,n.oid,'USAGE'\)/);
++ assert.match(previewCapabilitiesSql,/has_sequence_privilege\(current_user,c.oid,'SELECT,USAGE,UPDATE'\)/);
++ assert.match(previewCapabilitiesSql,/OR roleid=/);
++});
++test("missing or malformed privilege metadata cannot pass",()=>{
++ assert.throws(()=>assertPreviewPrivileges({},menuRelations,safeCapabilities));
++ assert.throws(()=>assertPreviewPrivileges(safeRole,menuRelations,{}));
++ assert.throws(()=>assertPreviewPrivileges(safeRole,[...menuRelations,{...extensionView,schema_usage:undefined as unknown as boolean}],safeCapabilities));
++});
++test("SQL proposal applies the same reachable-read and unconditional mutation distinction",()=>{
++ const sql=readFileSync("../docs/menu-restoration/proposed_preview_role.sql","utf8");
++ assert.match(sql,/OR \(has_schema_privilege\('fruits_roots_menu_preview',n.oid,'USAGE'\) AND/);
++ assert.match(sql,/TRUNCATE,MAINTAIN,REFERENCES/);
++ assert.doesNotMatch(sql,/GRANT USAGE ON SCHEMA extensions/i);
++});
+--- a/docs/menu-restoration/proposed_preview_role.sql
++++ b/docs/menu-restoration/proposed_preview_role.sql
+@@ -31,7 +31,8 @@
+  WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_' AND c.relkind IN ('r','p','v','m','f') AND (
+  has_table_privilege('fruits_roots_menu_preview',c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,MAINTAIN,REFERENCES,TRIGGER')
+  OR has_any_column_privilege('fruits_roots_menu_preview',c.oid,'INSERT,UPDATE,REFERENCES')
+- OR (NOT (n.nspname='public' AND c.relname IN ('categories','products','product_variants')) AND
++ OR (has_schema_privilege('fruits_roots_menu_preview',n.oid,'USAGE') AND
++ NOT (n.nspname='public' AND c.relname IN ('categories','products','product_variants')) AND
+  has_any_column_privilege('fruits_roots_menu_preview',c.oid,'SELECT')))) THEN
+  RAISE EXCEPTION 'Unexpected inherited application access; stop and review'; END IF;
+ END $$;
+@@ -56,7 +57,11 @@
+  AND has_function_privilege('fruits_roots_menu_preview',p.oid,'EXECUTE')) THEN
+  RAISE EXCEPTION 'Reachable SECURITY DEFINER routine requires separate review'; END IF;
+ END $$;
+--- Effective checks include PUBLIC-derived grants even with NOINHERIT.
++-- Effective relation checks include PUBLIC-derived grants even with NOINHERIT.
++-- A SELECT grant outside menu is forbidden when schema USAGE makes it reachable.
++-- Inaccessible extension statistics views do NOT justify platform-grant revocation.
++-- Mutation/MAINTAIN and sequence grants remain forbidden regardless of schema USAGE.
++-- No additional schema USAGE is granted to make verification pass.
+ -- Built-in catalog helpers/ordinary platform functions and PUBLIC TEMP privileges
+ -- are not revoked here; metadata inspection/manual review remains required.
+ -- No ownership, sequences, mutations, admin sessions, settings or financial grants.
+--- a/docs/menu-restoration/proposed_public_default_privileges.sql
++++ b/docs/menu-restoration/proposed_public_default_privileges.sql
+@@ -10,14 +10,8 @@
+  REVOKE ALL PRIVILEGES ON SEQUENCES FROM PUBLIC,anon,authenticated;
+ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public
+  REVOKE ALL PRIVILEGES ON FUNCTIONS FROM PUBLIC,anon,authenticated;
+--- Requires authority to alter this creator's defaults. If denied, the ENTIRE
+--- transaction must roll back. Do not grant platform-role membership to proceed.
+-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
+- REVOKE ALL PRIVILEGES ON TABLES FROM PUBLIC,anon,authenticated;
+-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
+- REVOKE ALL PRIVILEGES ON SEQUENCES FROM PUBLIC,anon,authenticated;
+-ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
+- REVOKE ALL PRIVILEGES ON FUNCTIONS FROM PUBLIC,anon,authenticated;
++-- supabase_admin creator defaults are a SEPARATE provider-authorized proposal:
++-- proposed_supabase_admin_public_defaults.sql. Never escalate to execute it.
+ -- IMPORTANT: schema-scoped REVOKE cannot override built-in/global PUBLIC EXECUTE
+ -- defaults for functions. New public routines MUST have explicit per-routine
+ -- REVOKE EXECUTE FROM PUBLIC,anon,authenticated in their creation transaction.
+--- /dev/null
++++ b/backend/src/previewPrivileges.ts
+@@ -0,0 +1,47 @@
++export type PreviewRelation = {
++  schema_name: string; relation_name: string; schema_usage: boolean;
++  can_read: boolean; table_mutation: boolean; column_mutation: boolean;
++};
++export function forbiddenPreviewRelation(row: PreviewRelation): boolean {
++  const approved = row.schema_name === "public" &&
++    ["categories", "products", "product_variants"].includes(row.relation_name);
++  // Mutation grants remain forbidden even if schema USAGE currently blocks use.
++  return row.table_mutation || row.column_mutation ||
++    (row.schema_usage && row.can_read && !approved);
++}
++export const previewRelationsSql = `SELECT n.nspname AS schema_name,c.relname AS relation_name,
++ has_schema_privilege(current_user,n.oid,'USAGE') AS schema_usage,
++ has_any_column_privilege(current_user,c.oid,'SELECT') AS can_read,
++ has_table_privilege(current_user,c.oid,'INSERT,UPDATE,DELETE,TRUNCATE,MAINTAIN,REFERENCES,TRIGGER') AS table_mutation,
++ has_any_column_privilege(current_user,c.oid,'INSERT,UPDATE,REFERENCES') AS column_mutation
++ FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
++ WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_'
++ AND c.relkind IN ('r','p','v','m','f')`;
++export const previewCapabilitiesSql = `SELECT
++ EXISTS (SELECT 1 FROM pg_auth_members WHERE member=(SELECT oid FROM pg_roles WHERE rolname=current_user)
++ OR roleid=(SELECT oid FROM pg_roles WHERE rolname=current_user)) AS memberships,
++ has_database_privilege(current_user,current_database(),'CREATE') AS database_create,
++ EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspname NOT IN ('pg_catalog','information_schema')
++ AND n.nspname !~ '^pg_' AND has_schema_privilege(current_user,n.oid,'CREATE')) AS schema_create,
++ EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
++ WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_'
++ AND c.relkind='S' AND has_sequence_privilege(current_user,c.oid,'SELECT,USAGE,UPDATE')) AS sequence_grant,
++ EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
++ WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname !~ '^pg_'
++ AND p.prokind IN ('f','p','w') AND p.prosecdef
++ AND has_schema_privilege(current_user,n.oid,'USAGE')
++ AND has_function_privilege(current_user,p.oid,'EXECUTE')) AS reachable_definer`;
++export function assertPreviewPrivileges(role: Record<string, unknown>, relations: PreviewRelation[], capabilities: Record<string, unknown>) {
++  if (role.name !== "fruits_roots_menu_preview" || role.read_only !== "on" || role.rolcanlogin !== true ||
++      ["rolinherit","rolsuper","rolbypassrls","rolcreatedb","rolcreaterole","rolreplication"].some(flag => role[flag] !== false)) {
++    throw new Error("Preview role validation failed");
++  }
++  if (["memberships","database_create","schema_create","sequence_grant","reachable_definer"].some(flag => capabilities[flag] !== false) ||
++      relations.some(row => typeof row.schema_name !== "string" || typeof row.relation_name !== "string" ||
++        [row.schema_usage,row.can_read,row.table_mutation,row.column_mutation].some(flag => typeof flag !== "boolean") || forbiddenPreviewRelation(row))) throw new Error("Preview privilege validation failed");
++  for (const name of ["categories","products","product_variants"]) {
++    if (!relations.some(row => row.schema_name === "public" && row.relation_name === name && row.schema_usage && row.can_read)) {
++      throw new Error("Preview menu access missing");
++    }
++  }
++}
+--- /dev/null
++++ b/docs/menu-restoration/proposed_supabase_admin_public_defaults.sql
+@@ -0,0 +1,19 @@
++-- PROPOSAL ONLY. Separate provider-supported authorization required.
++-- Target mrjsfznxbwjsdzyuzvsi only, independently verified. Do NOT run as postgres
++-- without demonstrated authority. No role escalation or platform membership grants.
++-- Scope: future objects created by supabase_admin IN public, never platform schemas.
++BEGIN;
++SET LOCAL lock_timeout='5s';
++SET LOCAL statement_timeout='30s';
++-- Requires authority to alter this creator's defaults. If denied, the ENTIRE
++-- transaction must roll back. Do not grant platform-role membership to proceed.
++ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
++ REVOKE ALL PRIVILEGES ON TABLES FROM PUBLIC,anon,authenticated;
++ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
++ REVOKE ALL PRIVILEGES ON SEQUENCES FROM PUBLIC,anon,authenticated;
++ALTER DEFAULT PRIVILEGES FOR ROLE supabase_admin IN SCHEMA public
++ REVOKE ALL PRIVILEGES ON FUNCTIONS FROM PUBLIC,anon,authenticated;
++-- Schema-local function REVOKE does not override global PUBLIC EXECUTE defaults.
++-- Future public application routines need explicit per-function revocation in the
++-- creation transaction. No global defaults or platform-schema defaults changed.
++COMMIT;
+--- /dev/null
++++ b/docs/menu-restoration/SECURITY_REVISIONS_REVIEW.md
+@@ -0,0 +1,113 @@
++# Final local security revisions — NOT EXECUTED
++
++This review supersedes older combined-default and public-only runtime-check notes.
++No database connections/SQL, credentials, environment changes or deployments in this task.
++
++## Shared access model
++A non-menu relation's SELECT grant is rejected when schema USAGE makes it reachable.
++A grant to extensions.pg_stat_statements without extensions USAGE is tolerated; no
++platform grants revoked and no extra schema USAGE granted. Table/column mutation
++privileges including MAINTAIN remain forbidden even without schema USAGE. Sequence
++SELECT/USAGE/UPDATE also remain forbidden. Cross-schema CREATE, database CREATE,
++role memberships in either direction and reachable SECURITY DEFINER routines fail.
++NOINHERIT does not erase PUBLIC permissions or permission to SET ROLE: memberships
++must remain empty. Ordinary platform functions/catalog helpers/PUBLIC TEMPORARY are
++not automatically revoked. No transitive function-source audit is claimed.
++
++SQL proposal and startup now use this same model; pure database-free classification
++and metadata-query tests cover it. Startup metadata helpers query catalogs only.
++Preview HTTP paths/allowlist/normal application behavior are unchanged.
++
++## Client isolation scope reviewed, unchanged
++Ten named public application tables including sessions/financial tables, five named
++application sequences. Revokes table AND column permissions from PUBLIC/anon/
++authenticated; enables RLS and forces session RLS; rejects remaining inherited access.
++Postgres owner/BYPASSRLS and service_role access retained. External REST/GraphQL/
++Realtime jobs/direct-client dependencies need owner review. Existing policies are
++not dropped, no rows or sequence values altered. Existing inspection found no
++policies. restaurant_tables table is outside this ten-table scope; no new object
++scope silently added. Its separately named ID sequence is in the reviewed five.
++No changes to the retained Razorpay testing project.
++
++## Split default proposals
++proposed_public_default_privileges.sql now alters postgres defaults IN public only.
++proposed_supabase_admin_public_defaults.sql is separately provider-authorized;
++postgres must not escalate/grant itself platform membership to execute it.
++Both leave auth/storage/realtime/vault/extensions/global defaults untouched.
++Schema-scoped revokes cannot remove global/built-in PUBLIC function EXECUTE.
++Each future application routine needs explicit per-routine revocation in its creation
++transaction; no new public routines are currently planned. Other creators remain
++subject to separate review. Defaults do not retroactively repair existing ACLs.
++
++## Snapshot integrity and protected backup instructions — NOT RUN
++Privately verified original snapshot SHA-256:
++25f97e339581db0421ac96e94eaa1e5d04d909c9e49b246b37f830f38cded1b8
++It contains both script result sets, recorded rollbacks and the repeatable-read
++snapshot. No raw contents were logged or copied. Source remains in Windows Temp.
++This is security-metadata recovery evidence, NOT a data backup/executable rollback.
++
++After separate approval, run the following locally in PowerShell; do not upload results:
++
++```powershell
++$sourceSnapshot = 'C:\Users\Nishat\AppData\Local\Temp\fr-security-snapshot-SZsOHw\complete-security-snapshot.json'
++$backupFolder = Join-Path $env:LOCALAPPDATA ('FruitsRoots\SecuritySnapshots\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
++$backupFile = Join-Path $backupFolder 'complete-security-snapshot.json'
++$expectedHash = '25f97e339581db0421ac96e94eaa1e5d04d909c9e49b246b37f830f38cded1b8'
++if ((Get-FileHash -LiteralPath $sourceSnapshot -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) { throw 'Snapshot hash mismatch; stop' }
++New-Item -ItemType Directory -Path $backupFolder -ErrorAction Stop | Out-Null
++$accountName = [Security.Principal.WindowsIdentity]::GetCurrent().Name
++icacls.exe $backupFolder /inheritance:r /grant:r "${accountName}:(OI)(CI)F" | Out-Null
++if ($LASTEXITCODE -ne 0) { throw 'Cannot restrict backup permissions; stop' }
++if (Test-Path -LiteralPath $backupFile) { throw 'Backup exists; stop without overwriting' }
++Copy-Item -LiteralPath $sourceSnapshot -Destination $backupFile -ErrorAction Stop
++if ((Get-FileHash -LiteralPath $backupFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) { throw 'Backup integrity check failed' }
++Write-Host 'Protected backup verified; contents not displayed.'
++```
++
++Keep outside Git/cloud-shared folders. NTFS ACL restriction is not encryption at
++rest: use a managed encrypted device/volume and protect Windows account access.
++Do not delete original snapshot until backup integrity and readability confirmed.
++Policy expressions/ACLs are private metadata. Preserve grantors/grant options and
++NULL-default meaning. Reconstruct recovery SQL only after approval; never broadly
++restore unsafe session/financial client grants.
++
++## Required before public menu preview
++1. Preserve protected snapshot; confirm no dependency on removed direct client grants.
++2. Approve/apply existing client isolation, including unsafe financial/session and
++   sequence privileges. These existing exposures should not wait for payment launch.
++3. Approve/apply postgres public-default correction before future application DDL.
++4. Approve/apply passwordless preview role with verified isolation; separately approve
++   private password provisioning and read-only actual-role verification. No live write
++   probes on original records. Keep existing broad postgres out of preview service.
++5. Recheck same role metadata on Render and negative TLS/config tests in an isolated
++   environment. Use only start:preview, matching VITE_MENU_PREVIEW and HTTPS origins.
++6. Resolve/explicitly assess upstream TLS, deploy only after separate approval;
++   menu-only GET endpoints, no credentials/payment/admin routes in frontend.
++
++## Can wait for full ordering/payment release
++- Razorpay 016/live gateway work, checkout/admin mutations, broad backend runtime role,
++  order/payment concurrency tests and missing-menu inserts are not needed for text preview.
++- Storage/image changes can wait while preview is text-only.
++- supabase_admin public-default correction may be scheduled with provider support
++  IF no public application objects are created by that role in the interim, change
++  monitoring/owner approval are recorded, and existing unsafe grants are removed.
++  This is a conditional deferral, not a claim those defaults are fixed. If future
++  creator activity cannot be controlled/reviewed, it remains a preview blocker.
++
++## Transaction/recovery/approval order
++Each SQL file is independent BEGIN/COMMIT with timeouts. Errors roll back that file;
++a later file does not roll back earlier commits. Defaults/client revokes are repeatable
++for reviewed objects; role/policy creation intentionally refuses existing names.
++Never drop or repurpose a conflicting role. Freeze concurrent DDL/grant edits while
++comparing snapshot and executing approved revision. Target must independently match
++mrjsfznxbwjsdzyuzvsi; filenames/comments do not validate connection identity.
++Approve: local revision review -> protected backup -> dependencies/change window ->
++postgres defaults and client isolation -> preview role -> password and read-only
++verification -> separate provider default correction/recorded deferral -> Render
++configuration/TLS -> explicit deployment. No execution approval inferred here.
++
++## Verification
++Preview regressions: 14 passed, 0 failed. Existing backend suite: 133 passed, 0 failed. Backend TypeScript build passed.
++No database execution, actual new-role permissions or deployed TLS verification claimed.
++Exact incremental diffs are in SECURITY_REVISION_DIFF.patch (relative to task-start
++local contents, preserving prior uncommitted work; the patch does not include itself).

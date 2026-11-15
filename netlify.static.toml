@@ -1,0 +1,16 @@
+# Optional static experiment only. Select this config explicitly; not the full app.
+[build]
+  command = "npm --prefix frontend ci && npm --prefix frontend run build:static"
+  publish = "frontend/dist-static"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "no-referrer"

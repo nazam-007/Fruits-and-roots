@@ -3,6 +3,7 @@ import { Router, type RequestHandler } from "express";
 import QRCode from "qrcode";
 import { z } from "zod";
 import { db } from "../db";
+import { cancelWithRefund, RefundError, refundProjection } from "../refunds";
 import { razorpayTestEnabled } from "../razorpay";
 import {
   getRestaurantAvailability,
@@ -264,6 +265,7 @@ function toOrderResponse(row: {
   payment_expires_at?: Date;
   payment_source: string | null;
   order_status: string;
+  refund?: Record<string, unknown>;
   created_at: Date;
   items?: Array<{
     productId: string;
@@ -287,6 +289,7 @@ function toOrderResponse(row: {
       : {}),
     paymentSource: row.payment_source,
     orderStatus: row.order_status,
+    refund: row.refund,
     createdAt: row.created_at,
     ...(row.items ? { items: row.items } : {}),
     ...(trackingToken ? { trackingToken } : {}),
@@ -301,6 +304,7 @@ async function loadOrder(orderId: string) {
             o.payment_status,
             o.payment_expires_at,
             (SELECT p.payment_source FROM payments p WHERE p.order_id = o.id LIMIT 1) AS payment_source,
+            (SELECT ${refundProjection("p")} FROM payments p WHERE p.order_id=o.id LIMIT 1) AS refund,
             o.order_status, o.created_at,
             COALESCE(
               json_agg(
@@ -1145,77 +1149,14 @@ router.post(
       return;
     }
 
-    const client = await db.connect();
     try {
-      await client.query("BEGIN");
-      const cancellation = await client.query(
-        `UPDATE orders
-         SET order_status = 'CANCELLED'
-         WHERE id = $1
-           AND tracking_token_hash = $2
-           AND order_status = 'PLACED'
-         RETURNING id, order_status`,
-        [orderId.data, hash(token)],
-      );
-
-      if (cancellation.rowCount !== 1) {
-        const orderResult = await client.query(
-          `SELECT tracking_token_hash, order_status
-           FROM orders
-           WHERE id = $1`,
-          [orderId.data],
-        );
-        const order = orderResult.rows[0];
-        if (!order || !hashesMatch(order.tracking_token_hash, hash(token))) {
-          await client.query("ROLLBACK");
-          res.status(404).json({ message: "Order not found." });
-          return;
-        }
-
-        await client.query("ROLLBACK");
-        res.status(409).json({
-          message:
-            order.order_status === "PREPARING" || order.order_status === "READY"
-              ? "This order can no longer be cancelled because preparation has started."
-              : order.order_status === "COMPLETED"
-                ? "Completed orders cannot be cancelled."
-                : "This order has already been cancelled.",
-        });
-        return;
-      }
-
-      const paymentResult = await client.query(
-        `SELECT payment_status, payment_source, verified_at
-         FROM payments
-         WHERE order_id = $1
-         LIMIT 1`,
-        [orderId.data],
-      );
-      const payment = paymentResult.rows[0];
-      const refundReviewRequired =
-        payment?.payment_status === "PAID" &&
-        payment.payment_source === "MANUAL_UPI" &&
-        payment.verified_at !== null;
-
-      await client.query("COMMIT");
-      publishOrderStatus(orderId.data, "CANCELLED");
-      res.status(200).json({
-        orderId: orderId.data,
-        orderStatus: "CANCELLED",
-        refundReviewRequired,
-      });
+      const result = await cancelWithRefund(db, orderId.data, hash(token));
+      if (result.changed) publishOrderStatus(orderId.data, "CANCELLED");
+      res.status(200).json(result);
     } catch (error) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        // The transaction may already have been rolled back by PostgreSQL.
-      }
-      console.error("Customer order cancellation failed", {
-        code: (error as { code?: string }).code,
-      });
+      if (error instanceof RefundError) { res.status(error.status).json({ message: error.message }); return; }
+      console.error("Customer order cancellation failed", { code: (error as { code?: string }).code });
       res.status(500).json({ message: "Unable to cancel this order." });
-    } finally {
-      client.release();
     }
   },
 );

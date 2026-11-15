@@ -1,10 +1,13 @@
 import { useCallback, useRef, useState } from "react";
+import type { FormEvent } from "react";
+import RefundStatus from "../../components/RefundStatus";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import {
   fetchAdminOrder,
   updateAdminOrderStatus,
   verifyAdminPayment,
+  recordAdminRefund,
   type AdminOrderLifecycleStatus,
   type AdminOrderDetails as OrderDetailsType,
 } from "../../services/adminApi";
@@ -65,6 +68,29 @@ export default function AdminOrderDetails() {
   }, [orderId]);
 
   const refreshNow = useVisiblePolling(refresh, 2000, orderId);
+
+  const completeRefund = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!order || savingRef.current) return;
+    if (!window.confirm(order.refund?.testMode ? "Record this simulated test refund? No real refund will be sent." : "Have you independently verified the money was returned using bank or payment records? This only records the refund; it sends no money.")) return;
+    const form = event.currentTarget;
+    const data = new FormData(form);
+    savingRef.current = true; setSaving(true); setError(null); setNotice(null);
+    try {
+      const amount = Number(data.get("refundAmount"));
+      if (!Number.isFinite(amount) || amount <= 0 || !/^\d+(?:\.\d{1,2})?$/.test(String(data.get("refundAmount")))) throw Error("Enter a valid refund amount with at most two decimal places.");
+      if (data.get("refundConfirmed") !== "on") throw Error("Independently verify the returned payment first.");
+      const result = await recordAdminRefund(order.id, {
+        reference: String(data.get("refundReference")), amountPaise: Math.round(amount * 100),
+        completedAt: new Date(String(data.get("refundCompletedAt"))).toISOString(),
+        evidenceNote: String(data.get("refundEvidence")), moneyReturnedConfirmed: true,
+      });
+      if (result.refundStatus !== "COMPLETED") throw Error("Refund completion was not confirmed.");
+      setNotice("Refund completion recorded. No automatic refund was initiated.");
+      form.reset(); savingRef.current = false; await refreshNow();
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Unable to record refund."); }
+    finally { savingRef.current = false; setSaving(false); }
+  };
 
   const changeStatus = async () => {
     if (!order) return;
@@ -339,6 +365,25 @@ export default function AdminOrderDetails() {
             </button>
           )}
         </div>
+        <RefundStatus refund={order.refund} paidCancelled={order.order_status === "CANCELLED" && order.payment_status === "PAID" && order.payment_source !== "DEMO"} />
+        {order.refund?.status === "COMPLETED" && <div className="my-3 space-y-2 break-words text-sm">
+          <p>Refund reference: {order.refund.reference} · Recorded by: {order.refund.recordedBy}</p>
+          {order.refund.recordedAt && <p>Recorded at: {new Date(order.refund.recordedAt).toLocaleString("en-IN")}</p>}
+          {order.refund.evidenceNote && <p>Verified evidence: {order.refund.evidenceNote}</p>}
+        </div>}
+        {order.order_status === "CANCELLED" && order.refund?.status === "PENDING" && (
+          <form onSubmit={event => void completeRefund(event)} className="my-5 space-y-3 rounded-2xl border p-4">
+            <h2 className="font-semibold">Record {order.refund.testMode ? "simulated test" : "manually completed"} refund</h2>
+            <p className="text-sm">This records evidence only. It does not send money or call Razorpay refunds.</p>
+            <label className="block text-sm">Refund reference<input name="refundReference" required minLength={4} maxLength={120} pattern="[A-Za-z0-9/-]+" disabled={saving} className="mt-1 block w-full min-w-0 rounded-lg border p-2" /></label>
+            <label className="block text-sm">Refund amount (₹)<input name="refundAmount" type="number" required min="0.01" step="0.01" defaultValue={Number(order.refund.amountPaise) / 100} disabled={saving} className="mt-1 block w-full min-w-0 rounded-lg border p-2" /></label>
+            <label className="block text-sm">Returned at<input name="refundCompletedAt" type="datetime-local" step="0.001" required disabled={saving} className="mt-1 block w-full min-w-0 rounded-lg border p-2" /></label>
+            <p className="text-xs">Use the actual local return time, including seconds where available; it must follow cancellation.</p>
+            <label className="block text-sm">Verified refund evidence<textarea name="refundEvidence" required minLength={10} maxLength={500} disabled={saving} placeholder="Describe the independently checked return record; do not enter credentials." className="mt-1 block w-full min-w-0 rounded-lg border p-2" /></label>
+            <label className="flex items-start gap-2 text-sm"><input name="refundConfirmed" type="checkbox" required disabled={saving} />{order.refund.testMode ? "I verified the simulated test refund evidence." : "I independently verified that the money was returned."}</label>
+            <button type="submit" disabled={saving} className="min-h-11 rounded-full bg-[#31573a] px-5 text-white disabled:opacity-50">{saving ? "Recording..." : "Record completed refund"}</button>
+          </form>
+        )}
         {order.order_status === "CANCELLED" && (
           <p className="mt-3 text-sm text-red-800">Cancelled orders cannot be prepared.</p>
         )}

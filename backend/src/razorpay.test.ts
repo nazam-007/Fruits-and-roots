@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createHash, createHmac } from "node:crypto";
 import test from "node:test";
 import type { Pool } from "pg";
@@ -53,6 +54,42 @@ test("Razorpay gateway failures have a fixed category without copying provider e
 const config = { keyId: "rzp_test_fixture", secret: "fixture-secret" };
 const id = "00000000-0000-4000-8000-000000000201";
 const token = "t".repeat(48);
+test("undefined Razorpay columns roll back before gateway creation or persistence", async () => {
+  const error = { code: "42703" };
+  const statements: string[] = [];
+  let gatewayCalls = 0, released = 0;
+  const database = { connect: async () => ({
+    query: async (sql: string, params?: unknown[]) => {
+      statements.push(sql);
+      if (sql.startsWith("SELECT")) {
+        for (const column of ["razorpay_order_id", "razorpay_payment_id", "razorpay_key_id", "razorpay_amount_paise"])
+          assert.ok(sql.includes(`p.${column}`));
+        assert.ok(sql.includes("FOR UPDATE OF o,p"));
+        assert.ok(sql.includes("SUM(quantity::bigint*unit_price)"));
+        assert.deepEqual(params, [id]);
+        throw error;
+      }
+      return { rows: [] };
+    }, release: () => { released++; },
+  }) } as unknown as Pool;
+  const payments = razorpayPayments(database, {
+    createOrder: async () => { gatewayCalls++; throw Error("must not call gateway"); },
+    fetchPayment: async () => { throw Error("must not fetch payment"); },
+  }, config, () => { throw Error("must not publish an order"); });
+  await assert.rejects(payments.start(id, token), actual => actual === error);
+  assert.equal(gatewayCalls, 0);
+  assert.equal(released, 1);
+  assert.equal(statements[0], "BEGIN");
+  assert.equal(statements[2], "ROLLBACK");
+  assert.equal(statements.length, 3);
+});
+
+test("migration 016 explicitly rejects missing test key instead of SQL CHECK null acceptance", () => {
+  const sql = readFileSync("migrations/016_razorpay_test_payments.sql", "utf8");
+  assert.match(sql, /razorpay_key_id IS NOT NULL\s+AND left\(razorpay_key_id,9\) = 'rzp_test_'/);
+  assert.doesNotMatch(sql.replace(/--[^\n]*/g, ""), /\b(?:UPDATE|DELETE|TRUNCATE)\s+(?:public\.)?(?:orders|payments)\b/i);
+});
+
 function fixture() {
   let state = { id, total_amount: 240, item_total: "240", payment_status: "PENDING_PAYMENT", order_status: "PENDING_PAYMENT",
     tracking_token_hash: createHash("sha256").update(token).digest("hex"), payment_attempt_active: true,

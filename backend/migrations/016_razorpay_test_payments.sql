@@ -14,7 +14,8 @@ ALTER TABLE public.payments ADD CONSTRAINT payments_source_check
   CHECK (payment_source IN ('DEMO','MANUAL_UPI','RAZORPAY_TEST'));
 ALTER TABLE public.payments ADD CONSTRAINT payments_razorpay_test_binding_check CHECK (
   payment_source <> 'RAZORPAY_TEST' OR
-  (razorpay_order_id IS NOT NULL AND left(razorpay_key_id,9) = 'rzp_test_'
+  (razorpay_order_id IS NOT NULL AND razorpay_key_id IS NOT NULL
+   AND left(razorpay_key_id,9) = 'rzp_test_'
    AND razorpay_amount_paise IS NOT NULL AND razorpay_amount_paise > 0)
 );
 CREATE UNIQUE INDEX payments_razorpay_order_uidx ON public.payments(razorpay_order_id)
