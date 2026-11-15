@@ -258,6 +258,79 @@ test("Razorpay webhook validates exact raw bytes and production endpoints stay d
   }
 });
 
+test("customer cancellation and real admin preparation endpoints cannot both win", async () => {
+  const oldQuery = database.query, oldConnect = database.connect;
+  const id = "00000000-0000-4000-8000-000000000342", token = "c".repeat(48);
+  const trackingHash = createHash("sha256").update(token).digest("hex");
+  let state = { order_status: "PLACED", refund_status: "NONE" }, tail = Promise.resolve();
+  database.query = (async () => ({ rows: [{ admin_id: "race-admin" }] })) as unknown as Pool["query"];
+  database.connect = (async () => {
+    let staged = { ...state }, unlock: (() => void) | undefined;
+    return { query: async (sql: string, values?: unknown[]) => {
+      if (sql === "BEGIN") return { rows: [] };
+      if (sql === "COMMIT") { state = staged; unlock?.(); unlock = undefined; return { rows: [] }; }
+      if (sql === "ROLLBACK") { unlock?.(); unlock = undefined; return { rows: [] }; }
+      if (sql.includes("FROM orders WHERE id=$1 FOR UPDATE")) {
+        const previous = tail; tail = new Promise<void>(resolve => { unlock = resolve; }); await previous; staged = { ...state };
+        return { rows: [{ id, order_status: staged.order_status, payment_status: "PAID", total_amount: 120, tracking_token_hash: trackingHash }] };
+      }
+      if (sql.includes("FROM payments p")) return { rows: [{ payment_status: "PAID", payment_source: "MANUAL_UPI", verified_at: "2026-01-01",
+        verified_by: "admin", verified_transaction_reference: "PAID-342", reconciliation_required: false, refund_status: staged.refund_status }] };
+      if (sql.startsWith("UPDATE payments SET refund_status='PENDING'")) staged.refund_status = "PENDING";
+      else if (sql.includes("SET order_status = $2")) staged.order_status = String(values?.[1]);
+      else if (sql.startsWith("UPDATE orders SET order_status='CANCELLED'")) staged.order_status = "CANCELLED";
+      else throw Error("Unexpected race fixture SQL");
+      return { rows: [{ id }], rowCount: 1 };
+    }, release: () => { unlock?.(); } };
+  }) as unknown as Pool["connect"];
+  try {
+    const cancel = () => fetch(`${baseUrl}/api/orders/${id}/cancel`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+    const prepare = () => fetch(`${baseUrl}/api/admin/orders/${id}/status`, { method: "PATCH",
+      headers: { "Content-Type": "application/json", Cookie: `fr_admin_session=${"a".repeat(48)}` }, body: JSON.stringify({ status: "PREPARING" }) });
+    const responses = await Promise.all([cancel(), prepare()]);
+    assert.deepEqual(responses.map(r => r.status).sort(), [200, 409]);
+    assert.equal(state.refund_status, state.order_status === "CANCELLED" ? "PENDING" : "NONE");
+    await Promise.all(responses.map(r => r.body?.cancel()));
+    state = { order_status: "PREPARING", refund_status: "NONE" };
+    assert.equal((await cancel()).status, 409);
+  } finally { database.query = oldQuery; database.connect = oldConnect; }
+});
+
+test("refund completion requires an authorized admin and independently attested evidence", async () => {
+  const oldQuery = database.query, oldConnect = database.connect;
+  let completed = false, connects = 0;
+  const id = "00000000-0000-4000-8000-000000000341";
+  const input = { reference: "REFUND-341", amountPaise: 12000, completedAt: "2026-01-02T00:00:00Z",
+    evidenceNote: "Independently verified return in bank records", moneyReturnedConfirmed: true };
+  database.query = (async (sql: string) => {
+    assert.ok(sql.includes("FROM admin_sessions")); return { rows: [{ admin_id: "refund-admin" }] };
+  }) as unknown as Pool["query"];
+  database.connect = (async () => { connects++; return {
+    query: async (sql: string, values?: unknown[]) => {
+      if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+      if (sql.includes("FROM orders WHERE id=$1 FOR UPDATE")) return { rows: [{ id, order_status: "CANCELLED", payment_status: "PAID", total_amount: 120 }] };
+      if (sql.includes("FROM payments p")) return { rows: [{ payment_source: "MANUAL_UPI", payment_status: "PAID",
+        verified_at: "2026-01-01", verified_by: "admin", verified_transaction_reference: "PAID-341", reconciliation_required: false,
+        refund_status: completed ? "COMPLETED" : "PENDING", refund_due_paise: 12000, refund_requested_at: "2026-01-01T00:00:00Z",
+        refund_reference: input.reference, refund_amount_paise: input.amountPaise, refund_completed_at: input.completedAt, refund_evidence_note: input.evidenceNote }] };
+      assert.ok(sql.startsWith("UPDATE payments SET refund_status='COMPLETED'"));
+      assert.equal(values?.[4], "refund-admin"); completed = true; return { rows: [{ id }], rowCount: 1 };
+    }, release: () => {},
+  }; }) as unknown as Pool["connect"];
+  try {
+    const request = (body: unknown, authorized: boolean) => fetch(`${baseUrl}/api/admin/orders/${id}/refund`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...(authorized ? { Cookie: `fr_admin_session=${"a".repeat(48)}` } : {}) },
+      body: JSON.stringify(body),
+    });
+    assert.equal((await request(input, false)).status, 401); assert.equal(connects, 0);
+    assert.equal((await request({ ...input, moneyReturnedConfirmed: false }, true)).status, 400); assert.equal(connects, 0);
+    assert.equal((await request({ ...input, evidenceNote: "" }, true)).status, 400); assert.equal(connects, 0);
+    const valid = await request(input, true); assert.equal(valid.status, 200);
+    assert.equal((await valid.json()).refundStatus, "COMPLETED");
+    const retry = await request(input, true); assert.equal(retry.status, 200); assert.equal((await retry.json()).duplicate, true);
+  } finally { database.query = oldQuery; database.connect = oldConnect; }
+});
+
 test("public catalog change stream supports Server-Sent Events", async () => {
   const controller = new AbortController();
   const response = await fetch(`${baseUrl}/api/menu/events`, {
@@ -535,6 +608,34 @@ test("order creation respects restaurant ordering state", async () => {
       configurable: true,
       value: originalQuery,
     });
+  }
+});
+
+test("admin orders expose refund status without private refund evidence", async () => {
+  const originalQuery = database.query.bind(database);
+  Object.defineProperty(database, "query", {
+    configurable: true,
+    value: async (sql: string) => {
+      if (sql.includes("FROM admin_sessions")) return { rows: [{ admin_id: "test-admin" }] };
+      if (sql.includes("SELECT o.id, o.order_number")) {
+        assert.match(sql, /to_jsonb\(p\)->>'refund_status'/);
+        assert.doesNotMatch(sql, /refund_reference|refund_evidence_note|refund_recorded_by/);
+        return { rows: ["PENDING", "COMPLETED", "NONE"].map(refund_status => ({ refund_status })) };
+      }
+      if (sql.includes("COUNT(*)::int AS total")) return { rows: [{ total: 3, placed: 0, preparing: 0, ready: 0, completed: 0, cancelled: 3 }] };
+      throw new Error("Unexpected mocked query");
+    },
+  });
+  try {
+    const response = await fetch(`${baseUrl}/api/admin/orders?status=CANCELLED`, {
+      headers: { Cookie: `fr_admin_session=${"a".repeat(48)}` },
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.deepEqual(body.items.map((item: { refund_status: string }) => item.refund_status), ["PENDING", "COMPLETED", "NONE"]);
+    assert.equal(body.counts.CANCELLED, 3);
+  } finally {
+    Object.defineProperty(database, "query", { configurable: true, value: originalQuery });
   }
 });
 

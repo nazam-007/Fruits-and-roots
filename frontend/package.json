@@ -5,11 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:menu-preview": "vite --mode menu-preview",
+    "build:menu-preview": "tsc -b && vite build --mode menu-preview",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test:e2e": "playwright test",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "build:static": "tsc -b && vite build --config vite.static.config.ts",
+    "test:static": "playwright test --config playwright.static.config.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -1,0 +1,58 @@
+# Cancellation-based refund tracking — implementation and migration review
+
+2026-11-15. Source implementation only; migration 017 is PROPOSED, not executed. No connection to Supabase, modification of financial records, gateway refund, application restart, commit/push or deployment occurred. Existing uncommitted work is preserved.
+
+## Inspection and design
+Reviewed orders/admin/Razorpay routes, payment/order migrations 000-016, prior verified schema metadata, customer tracking and admin detail APIs/UI. No new live database inspection was performed. Existing cancellation used conditional PLACED UPDATE and a transient manual-UPI refund-review flag, without persistent refund history. Existing preparation used a transaction with joined row locks. Payment claims/cancellation/expiry remain separate and unchanged.
+
+New refunds.ts shares explicit order-first SELECT FOR UPDATE, then payment SELECT FOR UPDATE between customer cancellation, admin preparation/status changes and refund recording. Pending refund and CANCELLED are committed atomically; failed writes roll back both. If preparation wins, cancellation sees PREPARING and returns 409; if cancellation wins, preparation sees CANCELLED and returns 409. Cancellation remains conditional on PLACED even under the lock. Other payment transactions retain their existing locks/uniqueness behavior; PostgreSQL can still abort an unrelated conflicting transaction, so operational timeout/deadlock handling and approved real-DB tests remain necessary.
+
+Customer tracking-token authorization remains required (404 on invalid access). Duplicate cancellation returns the existing result with changed=false, no new obligation and no repeated status event. Post-placed cancellation is denied. PENDING_PAYMENT attempts still use the existing payment-cancel endpoint; this feature does not change pending checkout semantics.
+
+## Refund state and eligibility
+Payment status stays PAID; order status becomes CANCELLED. Refund is separate: NONE (none recorded), PENDING, COMPLETED. Full amount is server-calculated order total × 100, stored as integer paise. Both order and payment must be PAID with trusted backend verification evidence, no reconciliation flag, and a supported source. Manual UPI requires verified timestamp/admin/reference; Razorpay test requires verified timestamp/admin/payment ID. Inconsistent paid records fail for review rather than silently cancelling without a recorded refund. Unsuccessful payments create no refund. DEMO never creates a real financial obligation.
+
+RAZORPAY_TEST cancellation creates a simulated pending refund for end-to-end UI testing, clearly labelled Test Mode in both views. This is not evidence of a real payment or a real refund. No Razorpay refund endpoint/library/API call is made. Manual UPI obligations represent real money only when trusted original payment verification is present.
+
+Read endpoints project only refund fields via to_jsonb, so missing 017 columns do not break ordinary menu/order/admin reads. Before migration, status is UNAVAILABLE; a paid cancellation that needs a refund fails closed with 503 and leaves the order unchanged. Deploy the feature with approved schema readiness; do not suppress this gate. Historical cancelled paid orders are NOT backfilled. NONE/UNAVAILABLE on those orders displays a café-review warning rather than claiming money was returned. Retrying a historical cancellation does not synthesize a new financial record.
+
+## Proposed migration
+Exact source: backend/migrations/017_cancellation_refund_tracking.sql. Review target identity and current schema before separately approving execution. Existing 012/payment verification schema required; Razorpay testing additionally requires its separately approved 016 schema. No automatic migration runner was added.
+
+Adds payments columns: refund_status varchar(20) NOT NULL DEFAULT NONE; refund_due_paise bigint; refund_requested_at timestamptz; refund_reference varchar(120); refund_amount_paise bigint; refund_completed_at timestamptz; refund_recorded_at timestamptz; refund_recorded_by varchar(120); refund_evidence_note text. All audit fields nullable until their state requires them. No UPDATE, DELETE, backfill, gateway calls, role/policy/grant changes or new tables/sequences. Existing records acquire only the none-recorded default; payment/order values and histories stay unchanged.
+
+payments_refund_tracking_check enforces state shape, paid supported-source verification, positive due, pending audit fields empty, full completed amount, required reference/evidence/admin and timestamp ordering. Unique partial refund-reference index prevents reuse across orders. It is not a repeatable import: existing columns/index/constraint refuse replay. Each file is a BEGIN/COMMIT transaction with lock_timeout=5s and statement_timeout=30s. ALTER locks and constraint/index scans can block or time out; error -> ROLLBACK/close. No automatic retries or broad rollback DROP. After commit prepare a forward correction if needed; do not drop audit evidence or financial records. Review table-level runtime SELECT/UPDATE access and RLS; column-only roles may need separately approved updates. Never grant client roles audit access.
+
+## APIs and evidence
+POST /api/orders/:orderId/cancel retains bearer tracking access; returns orderId, orderStatus=CANCELLED, changed and refundReviewRequired. Reads expose refund {status,amountPaise,completedAt,testMode}; customers do NOT receive admin evidence/reference/identity.
+
+POST /api/admin/orders/:orderId/refund is behind existing origin/session admin authentication. Body:
+- reference: 4-120 characters, letters/numbers/slash/hyphen.
+- amountPaise: positive safe integer, exactly full pending/order amount (partial refunds not implemented).
+- completedAt: offset-aware ISO date, not future or before cancellation.
+- evidenceNote: 10-500 characters describing independently checked bank/payment return records, no credentials.
+- moneyReturnedConfirmed: literal true, no extra body fields accepted.
+
+Server derives refund_recorded_by from the authenticated session and sets refund_recorded_at itself. An exact retry is idempotent; different completion evidence is rejected with 409, as is a reused reference. No pending obligation, invalid amount or missing confirmation/evidence cannot complete. Completion only records an already returned refund; it sends no money. Reference/text/checkbox are staff attestations, not automatic bank verification. The café must inspect actual return evidence before submitting; authorized-admin honesty and audit review are operational requirements. Test-mode evidence must be synthetic and remain separate from real refunds.
+
+Admin details show the status, due amount, return timestamp and completed reference, recorder/time/evidence; form remains pending on errors and is guarded against duplicate submission. Customer tracking shows refund status and polls every 2s only while CANCELLED/PENDING, pausing hidden-document requests and cleaning up on unmount/completion; existing in-flight/stale-response guards remain. Other order lifecycle streaming/polling behavior is unchanged. Razorpay checkout, manual payment claims, dashboard filters and gross verified revenue/payment totals are unchanged; refunds do not silently rewrite paid history or turn gross revenue into net revenue.
+
+## Admin Orders refund column
+The authenticated Orders list returns only refund_status from the existing payment record, without refund references or evidence notes. Cancelled orders show amber Refund Pending or green Refund Completed immediately after Order status; NONE/missing states show an em dash. Completed Razorpay test refunds are labelled Simulated (Test Mode). Existing two-second visible-page polling refreshes the badge without reloading or resetting pagination/filters. No schema or refund-rule changes are required for this column.
+
+Column verification: 149 backend tests passed; backend and frontend builds and frontend lint passed. Existing pagination/refund-detail browser tests: 9 passed; new Orders refund-state/polling test: 3 passed across desktop, 390px and 375px viewports. The new test uses mocked completion and list responses and checks browser document identity, pagination retention and page overflow; it does not submit a real refund or contact Supabase.
+
+## Verification and remaining approval
+Backend tests cover placed cancellation, post-preparation refusal, unpaid/cancelled/expired eligibility, DEMO and test distinction, incomplete payment evidence, missing schema, rollback after refund write, duplicates, both simulated lock orders, concurrent completions, wrong amounts/times/attestation, customer privacy and actual Express authorization/concurrency paths. These use controlled pg mocks, not a PostgreSQL server. Browser tests cover cancellation -> pending -> completed polling, no real-money wording for test refunds, admin evidence form and failure preservation on desktop/mobile, plus existing checkout/Razorpay/auth/tracking cases.
+
+Before actual migration: choose/approve target, independently verify identity/TLS/current schema and backup/change window; account for existing expiry worker and external clients; review exact 017 SQL. Then separately approve metadata postchecks and synthetic real-database cancellation/preparation race, duplicate/reference uniqueness and refund transaction tests. No original/shared data mutation is authorized by this implementation. No production-readiness claim until these checks and existing security/payment blockers are resolved.
+
+## Completed verification
+Backend npm test: 147 passed, 0 failed (including 10 refund service tests and real Express authorization/concurrency regression tests with controlled database doubles). Backend strict TypeScript build passed. Frontend lint and production build passed. Focused Razorpay/checkout/auth/tracking/refund browser run: 36 passed, 0 failed; dedicated refund UI regression: 6 passed, 0 failed. No real database-backed tests ran. Migration SHA256: ad0188fd2a77219772fdf102d872b86010e5ca6c4c61fd03d798d78bd20805a8.
+
+Changed source files: backend/src/refunds.ts, backend/src/routes/orders.ts, backend/src/routes/admin.ts; backend tests refunds.test.ts/server.security.test.ts and package.json; frontend components/RefundStatus.tsx, pages/customer/OrderTracking.tsx, pages/admin/OrderDetails.tsx, services/ordersApi.ts/adminApi.ts; frontend/tests/e2e/refunds.spec.ts; proposed migration 017 and this report. Earlier modifications to migration 016, static/preview files and deployment reports were preserved. The final returned-at input supports seconds/fractional seconds to avoid minute-only entry constraints.
+
+## Migration 017 review update — 2026-11-15
+The supplied reviewed migration was already present and was preserved. Added explicit metadata-only prerequisite checks for verified_at, verified_by and reconciliation_required before ALTER TABLE, plus execution-precaution comments. Preserved the existing/partial nine-column refusal, NULL-safe CHECK (... IS TRUE), unique reference index and one-transaction timeouts. Added a database-free regression comparing all nine fields with backend source. No live schema validation, backup verification, service stop or SQL execution was performed. Independent project identity, recoverable backup, stopped backend/expiry worker and exact SQL approval remain manual prerequisites. The earlier migration hash above is superseded; current SHA256: 86d234227d65eeff737a45379337723321e0dcc79bb4f3a5174bbba97f4bed90.
+
+Update validation: backend npm test 148 passed, 0 failed; npm run build passed; git diff --check passed. These are database-free checks, not live PostgreSQL validation.

@@ -1,0 +1,666 @@
+{
+  "categories": [
+    {
+      "name": "Liquid Therapy",
+      "sort_order": 0
+    },
+    {
+      "name": "Fruitopia",
+      "sort_order": 1
+    },
+    {
+      "name": "Guilty Pleasures",
+      "sort_order": 2
+    },
+    {
+      "name": "Bread & Bite",
+      "sort_order": 3
+    }
+  ],
+  "products": [
+    {
+      "id": "drink-banana",
+      "name": "Banana",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 129
+        },
+        {
+          "size": "Large",
+          "price": 248
+        }
+      ]
+    },
+    {
+      "id": "drink-date",
+      "name": "Date",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 139
+        },
+        {
+          "size": "Large",
+          "price": 268
+        }
+      ]
+    },
+    {
+      "id": "drink-date-&-banana",
+      "name": "Date & Banana",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 149
+        },
+        {
+          "size": "Large",
+          "price": 288
+        }
+      ]
+    },
+    {
+      "id": "drink-mango",
+      "name": "Mango",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 149
+        },
+        {
+          "size": "Large",
+          "price": 288
+        }
+      ]
+    },
+    {
+      "id": "drink-kiwi",
+      "name": "Kiwi",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 159
+        },
+        {
+          "size": "Large",
+          "price": 308
+        }
+      ]
+    },
+    {
+      "id": "drink-dry-fruit",
+      "name": "Dry Fruit",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 159
+        },
+        {
+          "size": "Large",
+          "price": 308
+        }
+      ]
+    },
+    {
+      "id": "drink-dragon",
+      "name": "Dragon",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": true,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 169
+        },
+        {
+          "size": "Large",
+          "price": 328
+        }
+      ]
+    },
+    {
+      "id": "drink-blueberry",
+      "name": "Blueberry",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 169
+        },
+        {
+          "size": "Large",
+          "price": 328
+        }
+      ]
+    },
+    {
+      "id": "drink-strawberry",
+      "name": "Strawberry",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 169
+        },
+        {
+          "size": "Large",
+          "price": 328
+        }
+      ]
+    },
+    {
+      "id": "drink-avocado",
+      "name": "Avocado",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 199
+        },
+        {
+          "size": "Large",
+          "price": 388
+        }
+      ]
+    },
+    {
+      "id": "drink-pineapple",
+      "name": "Pineapple",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 89
+        },
+        {
+          "size": "Large",
+          "price": 168
+        }
+      ]
+    },
+    {
+      "id": "drink-mosambi",
+      "name": "Mosambi",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 89
+        },
+        {
+          "size": "Large",
+          "price": 168
+        }
+      ]
+    },
+    {
+      "id": "drink-watermelon",
+      "name": "Watermelon",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 89
+        },
+        {
+          "size": "Large",
+          "price": 168
+        }
+      ]
+    },
+    {
+      "id": "drink-beetroot",
+      "name": "Beetroot",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": true,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 59
+        },
+        {
+          "size": "Large",
+          "price": 108
+        }
+      ]
+    },
+    {
+      "id": "drink-abc",
+      "name": "ABC",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": true,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 99
+        },
+        {
+          "size": "Large",
+          "price": 188
+        }
+      ]
+    },
+    {
+      "id": "drink-grape",
+      "name": "Grape",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 129
+        },
+        {
+          "size": "Large",
+          "price": 248
+        }
+      ]
+    },
+    {
+      "id": "drink-mix-fruit",
+      "name": "Mix Fruit",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 129
+        },
+        {
+          "size": "Large",
+          "price": 248
+        }
+      ]
+    },
+    {
+      "id": "drink-anar",
+      "name": "Anar",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 129
+        },
+        {
+          "size": "Large",
+          "price": 248
+        }
+      ]
+    },
+    {
+      "id": "drink-orange",
+      "name": "Orange",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 149
+        },
+        {
+          "size": "Large",
+          "price": 288
+        }
+      ]
+    },
+    {
+      "id": "drink-apple",
+      "name": "Apple",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 169
+        },
+        {
+          "size": "Large",
+          "price": 328
+        }
+      ]
+    },
+    {
+      "id": "drink-lassi",
+      "name": "Lassi",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 69
+        },
+        {
+          "size": "Large",
+          "price": 128
+        }
+      ]
+    },
+    {
+      "id": "drink-cold-coffee",
+      "name": "Cold Coffee",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 159
+        },
+        {
+          "size": "Large",
+          "price": 308
+        }
+      ]
+    },
+    {
+      "id": "drink-persian-tea",
+      "name": "Persian Tea",
+      "category": "Liquid Therapy",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 35
+        },
+        {
+          "size": "Large",
+          "price": 60
+        }
+      ]
+    },
+    {
+      "id": "drink-turkish-tea",
+      "name": "Turkish Tea",
+      "category": "Liquid Therapy",
+      "available": false,
+      "availabilityStatus": "COMING_SOON",
+      "pendingRestoration": false,
+      "variants": []
+    },
+    {
+      "id": "drink-filter-coffee",
+      "name": "Filter Coffee",
+      "category": "Liquid Therapy",
+      "available": false,
+      "availabilityStatus": "COMING_SOON",
+      "pendingRestoration": false,
+      "variants": []
+    },
+    {
+      "id": "mix-fruit-salad",
+      "name": "Mix Fruit Salad",
+      "category": "Fruitopia",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 99
+        },
+        {
+          "size": "Large",
+          "price": 149
+        }
+      ]
+    },
+    {
+      "id": "exotic-fruit-salad",
+      "name": "Exotic Fruit Salad",
+      "category": "Fruitopia",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 249
+        },
+        {
+          "size": "Large",
+          "price": 549
+        }
+      ]
+    },
+    {
+      "id": "fruit-date-delight",
+      "name": "Fruit Date Delight",
+      "category": "Fruitopia",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 149
+        },
+        {
+          "size": "Large",
+          "price": 199
+        }
+      ]
+    },
+    {
+      "id": "biscoff-fruit-custard",
+      "name": "Biscoff Fruit Custard",
+      "category": "Fruitopia",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 99
+        },
+        {
+          "size": "Large",
+          "price": 188
+        }
+      ]
+    },
+    {
+      "id": "brownie-strawberry",
+      "name": "Brownie Strawberry",
+      "category": "Guilty Pleasures",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 199
+        },
+        {
+          "size": "Large",
+          "price": 388
+        }
+      ]
+    },
+    {
+      "id": "strawberry-chocolate",
+      "name": "Strawberry Chocolate",
+      "category": "Guilty Pleasures",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 99
+        },
+        {
+          "size": "Large",
+          "price": 169
+        }
+      ]
+    },
+    {
+      "id": "single-choco-waffle",
+      "name": "Single Choco Waffle",
+      "category": "Guilty Pleasures",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 99
+        },
+        {
+          "size": "Large",
+          "price": 188
+        }
+      ]
+    },
+    {
+      "id": "triple-choco-waffle",
+      "name": "Triple Choco Waffle",
+      "category": "Guilty Pleasures",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 129
+        },
+        {
+          "size": "Large",
+          "price": 248
+        }
+      ]
+    },
+    {
+      "id": "fruit-choco-waffle",
+      "name": "Fruit Choco Waffle",
+      "category": "Guilty Pleasures",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 159
+        },
+        {
+          "size": "Large",
+          "price": 308
+        }
+      ]
+    },
+    {
+      "id": "avocado-sandwich",
+      "name": "Avocado Sandwich",
+      "category": "Bread & Bite",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 90
+        },
+        {
+          "size": "Large",
+          "price": 170
+        }
+      ]
+    },
+    {
+      "id": "paneer-sandwich",
+      "name": "Paneer Sandwich",
+      "category": "Bread & Bite",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 99
+        },
+        {
+          "size": "Large",
+          "price": 188
+        }
+      ]
+    },
+    {
+      "id": "aalu-cheese-burger",
+      "name": "Aalu Cheese Burger",
+      "category": "Bread & Bite",
+      "available": true,
+      "availabilityStatus": "AVAILABLE",
+      "pendingRestoration": false,
+      "variants": [
+        {
+          "size": "Regular",
+          "price": 110
+        }
+      ]
+    }
+  ]
+}

@@ -12,6 +12,7 @@ import {
   verifyAdminPassword,
 } from "../adminPassword";
 import { db } from "../db";
+import { lockOrderPayment, manualRefundSchema, recordManualRefund, RefundError, refundProjection } from "../refunds";
 import { razorpayTestEnabled } from "../razorpay";
 import { operationalPaymentPredicate } from "../operationalOrders";
 import { publishOrderStatus } from "../orderStatusEvents";
@@ -425,7 +426,9 @@ router.get("/orders", async (req, res) => {
                o.total_amount, o.payment_status,
                o.order_status, o.created_at,
                 (SELECT p.payment_source FROM payments p
-                 WHERE p.order_id = o.id LIMIT 1) AS payment_source
+                 WHERE p.order_id = o.id LIMIT 1) AS payment_source,
+                (SELECT to_jsonb(p)->>'refund_status' FROM payments p
+                 WHERE p.order_id = o.id LIMIT 1) AS refund_status
          FROM orders o
          WHERE ${operationalPaymentPredicate("o")}
            AND ($1 = 'ALL' OR o.order_status = $1)
@@ -576,6 +579,7 @@ router.get("/orders/:orderId", async (req, res) => {
               o.fulfillment_type, o.order_type, o.table_number,
               o.total_amount, o.payment_status, o.payment_expires_at,
               o.order_status, o.created_at,
+              ${refundProjection("p", true)} AS refund,
               p.payment_status AS recorded_payment_status,
               p.payment_source, p.transaction_reference,
               p.verified_transaction_reference, p.verified_by, p.verified_at,
@@ -635,15 +639,8 @@ router.patch("/orders/:orderId/status", async (req, res) => {
   const client = await db.connect();
   try {
     await client.query("BEGIN");
-    const result = await client.query(
-      `SELECT o.order_status, o.payment_status, p.payment_source
-       FROM orders o
-       JOIN payments p ON p.order_id = o.id
-       WHERE o.id = $1
-       FOR UPDATE OF o, p`,
-      [orderId.data],
-    );
-    const order = result.rows[0];
+    const locked = await lockOrderPayment(client, orderId.data);
+    const order = locked ? { ...locked, payment_source: locked.payment.payment_source } : undefined;
     if (!order) {
       await client.query("ROLLBACK");
       res.status(404).json({ message: "Order not found." });
@@ -695,6 +692,23 @@ router.patch("/orders/:orderId/status", async (req, res) => {
     res.status(500).json({ message: "Unable to update order status." });
   } finally {
     client.release();
+  }
+});
+
+// Mounted after router.use(requireAdmin); no customer claim can complete a refund.
+router.post("/orders/:orderId/refund", async (req, res) => {
+  const id = z.string().uuid().safeParse(req.params.orderId);
+  const input = manualRefundSchema.safeParse(req.body);
+  if (!id.success || !input.success) { res.status(400).json({ message: "Refund reference, full amount, returned-at timestamp and confirmed evidence are required." }); return; }
+  try {
+    const result = await recordManualRefund(db, id.data, res.locals.adminId as string, input.data);
+    res.json({ orderId: id.data, ...result });
+  } catch (error) {
+    if (error instanceof RefundError) { res.status(error.status).json({ message: error.message }); return; }
+    const code = (error as { code?: string }).code;
+    if (code === "23505") { res.status(409).json({ message: "That refund reference is already recorded." }); return; }
+    console.error("Manual refund recording failed", { code });
+    res.status(503).json({ message: "Unable to record refund. No completion was assumed." });
   }
 });
 

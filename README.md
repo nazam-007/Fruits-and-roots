@@ -1,5 +1,14 @@
 # Fruits & Roots
 
+## Full application development defaults
+
+The full customer/admin React app is the default for `frontend` commands `npm run dev` and `npm run build`. A stale `VITE_MENU_PREVIEW` flag cannot select the experiment. The optional connected preview now requires `--mode menu-preview`; the static menu remains available only through `build:static` and `netlify.static.toml`.
+
+In `backend`, `npm run dev` starts the complete Express API (`src/server.ts`); `npm run dev:razorpay-testing` preserves the explicitly pinned testing launcher. **Normal API startup runs payment-expiry updates immediately. Review the chosen database and configuration before starting it.** The current normal local configuration must not be mistaken for the isolated testing configuration.
+
+See [the full-application deployment plan](docs/FULL_APPLICATION_DEPLOYMENT_PLAN.md) for current configuration issues, payment/security release gates and separately approved deployment steps. No database change or deployment is authorized by these commands.
+
+
 Fruits & Roots is a restaurant QR-ordering application with a customer menu and ordering flow, counter pickup, payment and order tracking, and an authenticated admin area for managing orders and menu products.
 
 ## Features

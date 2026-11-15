@@ -30,7 +30,8 @@ export default defineConfig({
     {
       command: "node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5181 --strictPort",
       url: baseURL,
-      env: { VITE_API_URL: "http://127.0.0.1:5191" },
+      // Prove a stale preview flag cannot replace the normal customer/admin app.
+      env: { VITE_API_URL: "http://127.0.0.1:5191", VITE_MENU_PREVIEW: "true" },
       reuseExistingServer: false,
     },
   ],

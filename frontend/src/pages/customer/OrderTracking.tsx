@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, ArrowRight, Check, Clock3, RefreshCw, ShieldCheck } from "lucide-react";
 import MenuItemImage from "../../components/customer/MenuItemImage";
+import RefundStatus from "../../components/RefundStatus";
 import { useMenu } from "../../context/MenuContext";
 import type { MenuItem } from "../../data/menu";
 import {
@@ -148,6 +149,15 @@ export default function OrderTracking() {
     refreshStatus,
   );
 
+  // Order lifecycle streaming stops at CANCELLED; refund progress can continue.
+  useEffect(() => {
+    if (order?.orderStatus !== "CANCELLED" || order.refund?.status !== "PENDING") return;
+    const refresh = () => { if (!document.hidden) void refreshStatus(); };
+    const timer = window.setInterval(refresh, 2000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", refresh); };
+  }, [order?.orderStatus, order?.refund?.status, refreshStatus]);
+
   const cancelCustomerOrder = async () => {
     if (!order || order.orderStatus !== "PLACED" || cancelRequestRef.current) {
       return;
@@ -171,7 +181,7 @@ export default function OrderTracking() {
       await refreshStatus();
       setNotice(
         result.refundReviewRequired
-          ? "Your order was cancelled. A verified UPI payment may need refund review; no refund was issued automatically."
+          ? "Your order was cancelled. Refund Pending — no refund was issued automatically."
           : "Your order was cancelled successfully.",
       );
     } catch (cancelError) {
@@ -446,6 +456,7 @@ export default function OrderTracking() {
               <li className="font-semibold text-[#984734]">Order Cancelled</li>
             )}
           </ol>
+          <RefundStatus refund={order.refund} paidCancelled={isCancelled && isPaid && order.paymentSource !== "DEMO"} />
           {order.orderStatus === "PLACED" && (
             <div className="mt-6 border-t border-[#eeece4] pt-5">
               <button

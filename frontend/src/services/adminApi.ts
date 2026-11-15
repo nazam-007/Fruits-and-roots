@@ -1,4 +1,5 @@
 import type { OpeningHours, RestaurantOrderingStatus } from "./menuApi";
+import type { RefundInfo } from "../components/RefundStatus";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -19,6 +20,7 @@ export type AdminOrderLifecycleStatus = AdminOrderStatus | "PENDING_PAYMENT";
 export type AdminPaymentSource = "DEMO" | "MANUAL_UPI" | "RAZORPAY_TEST" | null;
 
 export type AdminOrderRow = {
+  refund_status?: "NONE" | "PENDING" | "COMPLETED" | null;
   id: string;
   order_number: string;
   customer_name: string;
@@ -42,6 +44,7 @@ export type AdminOrderStatusCounts = Record<
 >;
 
 export type AdminOrderDetails = AdminOrderRow & {
+  refund?: RefundInfo;
   recorded_payment_status: AdminPaymentStatus | null;
   transaction_reference: string | null;
   verified_transaction_reference: string | null;
@@ -185,6 +188,15 @@ export function loginAdmin(username: string, password: string) {
 
 export function fetchAdminSession() {
   return request<{ adminId: string }>("/auth/session");
+}
+
+export function recordAdminRefund(orderId: string, input: {
+  reference: string; amountPaise: number; completedAt: string;
+  evidenceNote: string; moneyReturnedConfirmed: true;
+}) {
+  return request<{ orderId: string; refundStatus: "COMPLETED" }>(`/orders/${encodeURIComponent(orderId)}/refund`, {
+    method: "POST", body: JSON.stringify(input),
+  });
 }
 
 export function logoutAdmin() {

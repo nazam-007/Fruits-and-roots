@@ -258,6 +258,7 @@ export default function Orders() {
                       : "Payment"}
                   </th>
                   <th className="px-4 py-3">Order status</th>
+                  <th className="px-4 py-3">Refund Status</th>
                   <th className="px-4 py-3">Fulfillment</th>
                   <th className="px-4 py-3">Created</th>
                 </tr>
@@ -293,6 +294,23 @@ export default function Orders() {
                         )}
                     </td>
                     <td className="px-4 py-3">{order.order_status}</td>
+                    <td className="px-4 py-3">
+                      {order.order_status === "CANCELLED" &&
+                      (order.refund_status === "PENDING" || order.refund_status === "COMPLETED") ? (
+                        <span className={`inline-block rounded px-2 py-1 text-xs font-semibold ${
+                          order.refund_status === "PENDING"
+                            ? "bg-amber-100 text-amber-800"
+                            : "bg-green-100 text-green-800"
+                        }`}>
+                          {order.refund_status === "PENDING" ? "Refund Pending" : "Refund Completed"}
+                          {order.payment_source === "RAZORPAY_TEST" && (
+                            <span className="block text-[10px]">
+                              {order.refund_status === "COMPLETED" ? "Simulated (Test Mode)" : "Test Mode"}
+                            </span>
+                          )}
+                        </span>
+                      ) : "—"}
+                    </td>
                     <td className="px-4 py-3">{formatFulfillment(order)}</td>
                     <td className="px-4 py-3 text-[#73796d]">
                       {new Date(order.created_at).toLocaleString()}

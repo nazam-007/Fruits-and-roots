@@ -1,4 +1,5 @@
 import type { CartItem } from "../context/cartContextStore";
+import type { RefundInfo } from "../components/RefundStatus";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
@@ -31,6 +32,7 @@ export type OrderLine = {
 };
 
 export type OrderDetails = {
+  refund?: RefundInfo;
   orderId: string;
   orderNumber: string;
   customerName: string;

@@ -1,0 +1,446 @@
+{
+  "status": "PROPOSAL ONLY - NOT EXECUTED",
+  "reference_project": "mrjsfznxbwjsdzyuzvsi",
+  "target_project": null,
+  "currency": "INR",
+  "price_unit": "whole rupees (not paise)",
+  "categories": [
+    {
+      "name": "Liquid Therapy",
+      "sort_order": 0
+    },
+    {
+      "name": "Fruitopia",
+      "sort_order": 1
+    },
+    {
+      "name": "Guilty Pleasures",
+      "sort_order": 2
+    },
+    {
+      "name": "Bread & Bite",
+      "sort_order": 3
+    }
+  ],
+  "products": [
+    {
+      "id": "drink-banana",
+      "name": "Banana",
+      "category": "Liquid Therapy",
+      "regular_price": 129,
+      "large_price": 248,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-date",
+      "name": "Date",
+      "category": "Liquid Therapy",
+      "regular_price": 139,
+      "large_price": 268,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-date-&-banana",
+      "name": "Date & Banana",
+      "category": "Liquid Therapy",
+      "regular_price": 149,
+      "large_price": 288,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-mango",
+      "name": "Mango",
+      "category": "Liquid Therapy",
+      "regular_price": 149,
+      "large_price": 288,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-kiwi",
+      "name": "Kiwi",
+      "category": "Liquid Therapy",
+      "regular_price": 159,
+      "large_price": 308,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-dry-fruit",
+      "name": "Dry Fruit",
+      "category": "Liquid Therapy",
+      "regular_price": 159,
+      "large_price": 308,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-dragon",
+      "name": "Dragon",
+      "category": "Liquid Therapy",
+      "regular_price": 169,
+      "large_price": 328,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "repository missing-product restoration approved by owner"
+    },
+    {
+      "id": "drink-blueberry",
+      "name": "Blueberry",
+      "category": "Liquid Therapy",
+      "regular_price": 169,
+      "large_price": 328,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-strawberry",
+      "name": "Strawberry",
+      "category": "Liquid Therapy",
+      "regular_price": 169,
+      "large_price": 328,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-avocado",
+      "name": "Avocado",
+      "category": "Liquid Therapy",
+      "regular_price": 199,
+      "large_price": 388,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-pineapple",
+      "name": "Pineapple",
+      "category": "Liquid Therapy",
+      "regular_price": 89,
+      "large_price": 168,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-mosambi",
+      "name": "Mosambi",
+      "category": "Liquid Therapy",
+      "regular_price": 89,
+      "large_price": 168,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-watermelon",
+      "name": "Watermelon",
+      "category": "Liquid Therapy",
+      "regular_price": 89,
+      "large_price": 168,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-beetroot",
+      "name": "Beetroot",
+      "category": "Liquid Therapy",
+      "regular_price": 59,
+      "large_price": 108,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "repository missing-product restoration approved by owner"
+    },
+    {
+      "id": "drink-abc",
+      "name": "ABC",
+      "category": "Liquid Therapy",
+      "regular_price": 99,
+      "large_price": 188,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "repository missing-product restoration approved by owner"
+    },
+    {
+      "id": "drink-grape",
+      "name": "Grape",
+      "category": "Liquid Therapy",
+      "regular_price": 129,
+      "large_price": 248,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-mix-fruit",
+      "name": "Mix Fruit",
+      "category": "Liquid Therapy",
+      "regular_price": 129,
+      "large_price": 248,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-anar",
+      "name": "Anar",
+      "category": "Liquid Therapy",
+      "regular_price": 129,
+      "large_price": 248,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-orange",
+      "name": "Orange",
+      "category": "Liquid Therapy",
+      "regular_price": 149,
+      "large_price": 288,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-apple",
+      "name": "Apple",
+      "category": "Liquid Therapy",
+      "regular_price": 169,
+      "large_price": 328,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-lassi",
+      "name": "Lassi",
+      "category": "Liquid Therapy",
+      "regular_price": 69,
+      "large_price": 128,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-cold-coffee",
+      "name": "Cold Coffee",
+      "category": "Liquid Therapy",
+      "regular_price": 159,
+      "large_price": 308,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-persian-tea",
+      "name": "Persian Tea",
+      "category": "Liquid Therapy",
+      "regular_price": 35,
+      "large_price": 60,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-turkish-tea",
+      "name": "Turkish Tea",
+      "category": "Liquid Therapy",
+      "regular_price": null,
+      "large_price": null,
+      "available": false,
+      "availability_status": "COMING_SOON",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "drink-filter-coffee",
+      "name": "Filter Coffee",
+      "category": "Liquid Therapy",
+      "regular_price": null,
+      "large_price": null,
+      "available": false,
+      "availability_status": "COMING_SOON",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "mix-fruit-salad",
+      "name": "Mix Fruit Salad",
+      "category": "Fruitopia",
+      "regular_price": 99,
+      "large_price": 149,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "exotic-fruit-salad",
+      "name": "Exotic Fruit Salad",
+      "category": "Fruitopia",
+      "regular_price": 249,
+      "large_price": 549,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "fruit-date-delight",
+      "name": "Fruit Date Delight",
+      "category": "Fruitopia",
+      "regular_price": 149,
+      "large_price": 199,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "biscoff-fruit-custard",
+      "name": "Biscoff Fruit Custard",
+      "category": "Fruitopia",
+      "regular_price": 99,
+      "large_price": 188,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "brownie-strawberry",
+      "name": "Brownie Strawberry",
+      "category": "Guilty Pleasures",
+      "regular_price": 199,
+      "large_price": 388,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "strawberry-chocolate",
+      "name": "Strawberry Chocolate",
+      "category": "Guilty Pleasures",
+      "regular_price": 99,
+      "large_price": 169,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "single-choco-waffle",
+      "name": "Single Choco Waffle",
+      "category": "Guilty Pleasures",
+      "regular_price": 99,
+      "large_price": 188,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "triple-choco-waffle",
+      "name": "Triple Choco Waffle",
+      "category": "Guilty Pleasures",
+      "regular_price": 129,
+      "large_price": 248,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "fruit-choco-waffle",
+      "name": "Fruit Choco Waffle",
+      "category": "Guilty Pleasures",
+      "regular_price": 159,
+      "large_price": 308,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "avocado-sandwich",
+      "name": "Avocado Sandwich",
+      "category": "Bread & Bite",
+      "regular_price": 90,
+      "large_price": 170,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "paneer-sandwich",
+      "name": "Paneer Sandwich",
+      "category": "Bread & Bite",
+      "regular_price": 99,
+      "large_price": 188,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": false,
+      "provenance": "approved original-database menu snapshot"
+    },
+    {
+      "id": "aalu-cheese-burger",
+      "name": "Aalu Cheese Burger",
+      "category": "Bread & Bite",
+      "regular_price": 110,
+      "large_price": null,
+      "available": true,
+      "availability_status": "AVAILABLE",
+      "featured": true,
+      "provenance": "approved original-database menu snapshot"
+    }
+  ],
+  "excluded_pending_review": [
+    "banana-shake-039d6641",
+    "banana-shake-25bbec6e",
+    "banana-shake-efc90b34",
+    "banana-shake-40d8017d"
+  ],
+  "unexported_attributes": [
+    "description",
+    "product_tags",
+    "created_at",
+    "image_url (none stored on the 34 matched products in the approved inspection)"
+  ]
+}

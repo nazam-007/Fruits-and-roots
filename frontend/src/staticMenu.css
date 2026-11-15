@@ -1,0 +1,3 @@
+@import "./index.css";
+/* The isolated Vite root is outside src; explicitly scan this static UI. */
+@source "./StaticMenu.tsx";
