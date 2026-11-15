@@ -12,6 +12,13 @@ DO $$ BEGIN
      OR pg_has_role('authenticator', 'fruits_roots_backend', 'MEMBER') THEN
     RAISE EXCEPTION 'Client/API roles must not be members of the backend role';
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_roles WHERE rolname = 'fruits_roots_backend'
+      AND rolcanlogin AND NOT rolsuper AND NOT rolbypassrls
+      AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication
+  ) THEN
+    RAISE EXCEPTION 'The runtime role must be a restricted LOGIN role';
+  END IF;
 END $$;
 
 REVOKE ALL PRIVILEGES ON TABLE public.admin_sessions FROM PUBLIC, anon, authenticated;

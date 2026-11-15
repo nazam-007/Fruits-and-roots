@@ -1,7 +1,8 @@
 -- PROPOSAL ONLY. Target mrjsfznxbwjsdzyuzvsi, independently verified.
 -- Review other consumers first: direct browser CRUD/REST/GraphQL may break.
--- Existing Express postgres owner access and service_role are retained.
--- Direct REST/GraphQL/Realtime consumers of these tables/sequences may break.
+-- Existing Express access must first be cut over to fruits_roots_backend.
+-- Supabase service_role access is retained; direct REST/GraphQL/Realtime
+-- consumers of these tables/sequences may break.
 -- Apply only after approving exact sequence inventory and policy snapshot.
 -- Existing policies are preserved; grants deny clients; no policies dropped.
 -- This is NOT an approved change to the Razorpay testing project.
@@ -9,6 +10,38 @@
 BEGIN;
 SET LOCAL lock_timeout='5s';
 SET LOCAL statement_timeout='30s';
+-- Verify all eleven application tables before any ACL or RLS change.
+DO $$ BEGIN
+ IF EXISTS (
+  SELECT 1 FROM (VALUES
+   ('categories'),('products'),('product_variants'),('tags'),('product_tags'),
+   ('restaurant_settings'),('orders'),('order_items'),('payments'),
+   ('admin_sessions'),('restaurant_tables')
+  ) expected(name)
+  LEFT JOIN pg_namespace n ON n.nspname='public'
+  LEFT JOIN pg_class c ON c.relnamespace=n.oid AND c.relname=expected.name
+  WHERE c.oid IS NULL OR c.relkind NOT IN ('r','p')
+ ) THEN RAISE EXCEPTION 'Application table inventory mismatch; no permission changes applied'; END IF;
+ IF NOT EXISTS (
+  SELECT 1 FROM pg_roles
+  WHERE rolname='fruits_roots_backend' AND rolcanlogin AND NOT rolsuper
+   AND NOT rolbypassrls AND NOT rolcreatedb AND NOT rolcreaterole
+   AND NOT rolreplication
+ ) THEN RAISE EXCEPTION 'Restricted application LOGIN role is not ready'; END IF;
+ IF EXISTS (
+  SELECT 1 FROM (VALUES
+   ('categories'),('products'),('product_variants'),('tags'),('product_tags'),
+   ('restaurant_settings'),('orders'),('order_items'),('payments'),
+   ('admin_sessions'),('restaurant_tables')
+  ) expected(name)
+  WHERE NOT EXISTS (
+   SELECT 1 FROM pg_policies p
+   WHERE p.schemaname='public' AND p.tablename=expected.name
+    AND p.policyname='fr_backend_access' AND p.cmd='ALL'
+    AND 'fruits_roots_backend'=ANY(p.roles)
+  )
+ ) THEN RAISE EXCEPTION 'Runtime RLS policies are incomplete; no permission changes applied'; END IF;
+END $$;
 -- Verify every expected sequence BEFORE any REVOKE, GRANT or ALTER TABLE.
 -- Missing/wrong-kind names abort the whole transaction; unrelated sequences are untouched.
 DO $$ BEGIN
@@ -24,7 +57,8 @@ DO $$
 DECLARE relation_name text; column_name text; client_role text;
 BEGIN
  FOREACH relation_name IN ARRAY ARRAY['categories','products','product_variants',
- 'tags','product_tags','restaurant_settings','orders','order_items','payments','admin_sessions'] LOOP
+ 'tags','product_tags','restaurant_settings','orders','order_items','payments',
+ 'admin_sessions','restaurant_tables'] LOOP
   EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE public.%I FROM PUBLIC,anon,authenticated',relation_name);
   FOR column_name IN SELECT attname FROM pg_attribute
    WHERE attrelid=to_regclass('public.'||relation_name) AND attnum>0 AND NOT attisdropped LOOP
