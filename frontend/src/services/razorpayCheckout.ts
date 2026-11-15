@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "./api";
 type Callback = { razorpay_order_id: string; razorpay_payment_id: string; razorpay_signature: string };
 type Result = { paymentStatus: string; reconciliationRequired?: boolean };
 type Checkout = { open: () => void; close: () => void; on: (event: "payment.failed", handler: () => void) => void };

@@ -22,6 +22,22 @@ export async function initializeIntegrationSession(client: ClientBase): Promise<
   }
 }
 
+export async function initializeProductionSession(client: ClientBase): Promise<void> {
+  try {
+    await client.query(`SELECT
+      set_config('statement_timeout','15s',false),
+      set_config('lock_timeout','5s',false),
+      set_config('idle_in_transaction_session_timeout','30s',false)`);
+    const limits = (await client.query(`SELECT
+      current_setting('statement_timeout') AS statement,
+      current_setting('lock_timeout') AS lock,
+      current_setting('idle_in_transaction_session_timeout') AS idle`)).rows[0];
+    if (limits?.statement !== "15s" || limits?.lock !== "5s" || limits?.idle !== "30s") throw new Error();
+  } catch {
+    throw new Error("Production session timeout initialization/verification failed");
+  }
+}
+
 export function buildDatabaseConfig(
   env: NodeJS.ProcessEnv = process.env,
   readCertificate: (path: string) => string = (path) => readFileSync(path, "utf8"),
@@ -63,6 +79,11 @@ export function buildDatabaseConfig(
       lock_timeout: 5000,
       idle_in_transaction_session_timeout: 10000,
       onConnect: initializeIntegrationSession,
+    } : env.NODE_ENV === "production" ? {
+      statement_timeout: 15000,
+      lock_timeout: 5000,
+      idle_in_transaction_session_timeout: 30000,
+      onConnect: initializeProductionSession,
     } : {}),
     connectionString: env.DATABASE_URL,
     connectionTimeoutMillis: 10000,

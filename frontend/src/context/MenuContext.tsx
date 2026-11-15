@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import type { MenuItem } from "../data/menu";
+import { API_URL } from "../services/api";
 import {
   fetchMenu,
   fetchRestaurantOrderingStatus,
@@ -32,7 +33,6 @@ type MenuContextType = {
 const MenuContext = createContext<MenuContextType | undefined>(
   undefined
 );
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
 export function MenuProvider({
   children,

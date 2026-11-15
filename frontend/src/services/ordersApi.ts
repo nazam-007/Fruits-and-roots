@@ -1,7 +1,7 @@
 import type { CartItem } from "../context/cartContextStore";
 import type { RefundInfo } from "../components/RefundStatus";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "./api";
 
 export type OrderStatus =
   | "PENDING_PAYMENT"

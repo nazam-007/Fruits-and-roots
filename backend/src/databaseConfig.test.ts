@@ -1,9 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Client, type ClientBase } from "pg";
-import { buildDatabaseConfig, initializeIntegrationSession } from "./databaseConfig";
+import { buildDatabaseConfig, initializeIntegrationSession, initializeProductionSession } from "./databaseConfig";
 
 const databaseUrl = "postgres://fixture:unused@db.example.invalid:5432/fixture";
+
+test("production applies server timeouts before leasing connections and refuses pooler drift", async () => {
+  const config = buildDatabaseConfig({ NODE_ENV: "production", DATABASE_URL: databaseUrl });
+  assert.equal(config.statement_timeout, 15000);
+  assert.equal(config.lock_timeout, 5000);
+  assert.equal(config.idle_in_transaction_session_timeout, 30000);
+  assert.equal(config.connectionTimeoutMillis, 10000);
+  assert.equal(config.onConnect, initializeProductionSession);
+  const statements: string[] = [];
+  const client = { query: async (sql: string) => {
+    statements.push(sql);
+    return { rows: sql.includes("current_setting") ? [{ statement: "15s", lock: "5s", idle: "30s" }] : [] };
+  } } as unknown as ClientBase;
+  await initializeProductionSession(client);
+  assert.equal(statements.length, 2);
+  assert.match(statements[0]!, /set_config/);
+  await assert.rejects(initializeProductionSession({ query: async () => ({ rows: [] }) } as unknown as ClientBase),
+    { message: "Production session timeout initialization/verification failed" });
+});
 
 test("integration pool sessions apply and verify limits before initialization completes", async () => {
   const statements: string[] = [];

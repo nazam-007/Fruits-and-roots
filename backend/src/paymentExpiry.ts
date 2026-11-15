@@ -1,7 +1,7 @@
 import { db } from "./db";
+import { expiryWorker } from "./serverLifecycle";
 
 const DEFAULT_EXPIRY_MINUTES = 30;
-const EXPIRY_INTERVAL_MS = 60_000;
 
 export function getPendingPaymentExpiryMinutes() {
   const configured = process.env.PENDING_PAYMENT_EXPIRY_MINUTES;
@@ -38,23 +38,7 @@ export async function expirePendingPayments() {
 
 export function startPendingPaymentExpiryWorker() {
   getPendingPaymentExpiryMinutes();
-  let running = false;
-  const expire = async () => {
-    if (running) return;
-    running = true;
-    try {
-      await expirePendingPayments();
-    } catch (error) {
-      console.error("Pending payment expiry failed", {
-        code: (error as { code?: string }).code,
-      });
-    } finally {
-      running = false;
-    }
-  };
-
-  void expire();
-  const timer = setInterval(() => void expire(), EXPIRY_INTERVAL_MS);
-  timer.unref();
-  return timer;
+  return expiryWorker(expirePendingPayments, () => {
+    console.error("Pending payment expiry failed", { stage: "payment_expiry", category: "database" });
+  });
 }

@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+import { API_URL } from "./api";
 
 async function readResponse<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => null);

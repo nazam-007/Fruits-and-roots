@@ -12,6 +12,7 @@ import {
   verifyAdminPassword,
 } from "../adminPassword";
 import { db } from "../db";
+import { adminCookieSecurity, frontendOrigins } from "../deploymentConfig";
 import { lockOrderPayment, manualRefundSchema, recordManualRefund, RefundError, refundProjection } from "../refunds";
 import { razorpayTestEnabled } from "../razorpay";
 import { operationalPaymentPredicate } from "../operationalOrders";
@@ -26,10 +27,7 @@ import {
 const router = Router();
 const SESSION_COOKIE = "fr_admin_session";
 const SESSION_LIFETIME_MS = 8 * 60 * 60 * 1000;
-const allowedOrigins = (process.env.FRONTEND_ORIGIN || "http://localhost:5173")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
+const allowedOrigins = frontendOrigins();
 
 function hash(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -56,11 +54,9 @@ function setSessionCookie(res: import("express").Response, token: string) {
   const attributes = [
     `${SESSION_COOKIE}=${encodeURIComponent(token)}`,
     "Path=/api/admin",
-    "HttpOnly",
-    "SameSite=Strict",
+    ...adminCookieSecurity(),
     `Max-Age=${Math.floor(SESSION_LIFETIME_MS / 1000)}`,
   ];
-  if (process.env.NODE_ENV === "production") attributes.push("Secure");
   res.setHeader("Set-Cookie", attributes.join("; "));
 }
 
@@ -68,11 +64,9 @@ function clearSessionCookie(res: import("express").Response) {
   const attributes = [
     `${SESSION_COOKIE}=`,
     "Path=/api/admin",
-    "HttpOnly",
-    "SameSite=Strict",
+    ...adminCookieSecurity(),
     "Max-Age=0",
   ];
-  if (process.env.NODE_ENV === "production") attributes.push("Secure");
   res.setHeader("Set-Cookie", attributes.join("; "));
 }
 
