@@ -1,12 +1,15 @@
 -- PROPOSAL ONLY. Do not apply until disposable integration tests and approval.
 -- Requires the approved baseline plus 001-013. Run as the migration owner.
 -- No passwords, existing-role revocations, data copies or financial changes.
+-- Provision the login password separately with psql \password after approval.
+-- Connect through the shared SESSION pooler as
+-- fruits_roots_backend.<project-ref>. No role membership or SET ROLE is needed.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '30s';
 
 -- Deliberately fail if this role already exists: inspect it, do not repurpose it.
-CREATE ROLE fruits_roots_backend NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS
+CREATE ROLE fruits_roots_backend LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS
   NOCREATEDB NOCREATEROLE NOREPLICATION;
 ALTER ROLE fruits_roots_backend SET search_path = pg_catalog, public;
 DO $$ BEGIN
