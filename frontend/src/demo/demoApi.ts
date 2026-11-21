@@ -24,6 +24,12 @@ function read(): State {
   try { const raw = localStorage.getItem(KEY); if (raw) { const s = JSON.parse(raw) as State; if (s.version === 1 && Array.isArray(s.menu) && Array.isArray(s.orders)) return s; } } catch { /* Ignore corrupt demo state, never read production keys. */ }
   return initialState();
 }
+/** Demo access belongs to this origin's local order store, not a production session. */
+export function readDemoTrackingAccess(id: string): string | null {
+  if (!id.startsWith("demo-")) return null;
+  const local = read().orders.find(o => o.orderId === id && o.paymentSource === "DEMO");
+  return typeof local?.trackingToken === "string" && local.trackingToken.length > 0 ? local.trackingToken : null;
+}
 function save(s: State) {
   if (s.orders.length > 50) throw new Error("Demo limit reached. Reset demo data to start again.");
   try { localStorage.setItem(KEY, JSON.stringify(s)); } catch { throw new Error("Browser demo storage is unavailable or full. No order was submitted."); }

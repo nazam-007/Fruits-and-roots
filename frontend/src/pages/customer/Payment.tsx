@@ -21,6 +21,7 @@ import {
 
 import { openRazorpayTestCheckout } from "../../services/razorpayCheckout";
 import { browserStorageKey, IS_DEMO } from "../../demoMode";
+import { readOrderTrackingAccess } from "../../services/orderTrackingAccess";
 
 const IDEMPOTENCY_STORAGE_KEY = browserStorageKey("fruits-roots-payment-idempotency");
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
@@ -31,16 +32,7 @@ export default function Payment() {
   const { clearCart } = useCart();
   const { clearCheckoutDetails } = useCheckout();
   const [order, setOrder] = useState<OrderDetails | null>(null);
-  const [trackingToken] = useState<string | null>(() => {
-    if (!orderId) return null;
-    try {
-      return window.sessionStorage.getItem(
-        browserStorageKey(`fruits-roots-order-token:${orderId}`),
-      );
-    } catch {
-      return null;
-    }
-  });
+  const trackingToken = readOrderTrackingAccess(orderId);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);

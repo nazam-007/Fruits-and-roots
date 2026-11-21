@@ -4,7 +4,8 @@ import { ArrowLeft, ArrowRight, Check, Clock3, RefreshCw, ShieldCheck } from "lu
 import MenuItemImage from "../../components/customer/MenuItemImage";
 import RefundStatus from "../../components/RefundStatus";
 import { useMenu } from "../../context/MenuContext";
-import { browserStorageKey } from "../../demoMode";
+import { IS_DEMO } from "../../demoMode";
+import { readOrderTrackingAccess } from "../../services/orderTrackingAccess";
 import type { MenuItem } from "../../data/menu";
 import {
   cancelOrder,
@@ -64,14 +65,7 @@ export default function OrderTracking() {
   const refreshStatusRef = useRef<() => Promise<void>>(async () => {});
 
   const getTrackingToken = useCallback(() => {
-    if (!orderId) return null;
-    try {
-      return window.sessionStorage.getItem(
-        browserStorageKey(`fruits-roots-order-token:${orderId}`),
-      );
-    } catch {
-      return null;
-    }
+    return readOrderTrackingAccess(orderId);
   }, [orderId]);
 
   const refreshStatus = useCallback(async (showInitialLoading = false) => {
@@ -87,7 +81,9 @@ export default function OrderTracking() {
     if (!token) {
       if (mountedRef.current) {
         setError(
-          "This order's secure tracking access is not available in this browser tab.",
+          IS_DEMO
+            ? "This demo order is not stored in this browser. Use the same browser and site where it was created. Demo data is not shared across devices."
+            : "This order's secure tracking access is not available in this browser tab.",
         );
         setLoading(false);
       }

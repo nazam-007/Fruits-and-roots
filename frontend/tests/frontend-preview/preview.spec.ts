@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import snapshot from "../../src/data/static-menu.snapshot.json" with { type: "json" };
 import manifest from "../../../docs/menu-restoration/approved-menu.manifest.json" with { type: "json" };
-import { demoFetch } from "../../src/demo/demoApi";
+import { demoFetch, readDemoTrackingAccess } from "../../src/demo/demoApi";
 
 test.beforeEach(async ({ context }) => {
   await context.addInitScript(() => {
@@ -55,6 +55,9 @@ test("local adapter validates pricing, idempotency, unpaid exclusion and transit
     const input = { customerName: "Demo Test", items: [{ productId: "avocado-sandwich", size: "Regular", quantity: 2 }], idempotencyKey: "demo-idempotency", totalAmount: 1 };
     const created = await (await request("/api/orders", "POST", input)).json();
     expect(created.totalAmount).toBe(180);
+    expect(readDemoTrackingAccess(created.orderId)).toBe(created.trackingToken);
+    expect(readDemoTrackingAccess("production-order-id")).toBeNull();
+    expect(readDemoTrackingAccess("demo-not-stored")).toBeNull();
     expect((await (await request("/api/orders", "POST", input)).json()).orderId).toBe(created.orderId);
     expect((await request(`/api/orders/${created.orderId}`, "GET", undefined, "wrong-token")).status).toBe(404);
     await request("/api/admin/auth/login", "POST", {});
@@ -117,8 +120,12 @@ test("direct menu/admin navigation and refresh retain the original interfaces an
   await expect(page.getByLabel("Demo notice")).toContainText("DEMO MODE");
   const admin = await context.newPage();
   admin.on("dialog", dialog => dialog.accept());
-  await admin.goto("/admin");
+  await admin.goto("/menu");
+  const documentRequests: string[] = [];
+  admin.on("request", request => { if (request.resourceType() === "document") documentRequests.push(request.url()); });
+  await admin.getByRole("link", { name: "Demo admin", exact: true }).click();
   await expect(admin.getByRole("heading", { name: "Admin demo" })).toBeVisible();
+  expect(documentRequests).toEqual([]);
   await admin.getByRole("button", { name: "Enter admin demo" }).click();
   await expect(admin).toHaveURL(/\/admin$/);
   await expect(admin.getByRole("heading", { level: 1 })).toBeVisible();
@@ -147,6 +154,19 @@ for (const width of [390, 1440]) {
     await page.getByRole("button", { name: "Simulate Successful Payment" }).click();
     await expect(page).toHaveURL(new RegExp(`/order/${id}$`));
     await expect(page.getByText("Demo Paid", { exact: true })).toBeVisible();
+    // Reproduce the reported access failure: no per-tab tracking keys remain.
+    await page.evaluate(() => {
+      for (const key of Object.keys(sessionStorage)) if (key.startsWith("fr-demo:fruits-roots-order-token:")) sessionStorage.removeItem(key);
+    });
+    await page.reload();
+    await expect(page.getByText("Demo Paid", { exact: true })).toBeVisible();
+    const freshTrackingTab = await context.newPage();
+    await freshTrackingTab.setViewportSize({ width, height: 900 });
+    await freshTrackingTab.goto(`/order/${id}`);
+    await expect(freshTrackingTab.getByText("Demo Paid", { exact: true })).toBeVisible();
+    expect(await freshTrackingTab.evaluate(() => Object.keys(sessionStorage).some(key => key.startsWith("fr-demo:fruits-roots-order-token:")))).toBe(false);
+    await freshTrackingTab.reload();
+    await expect(freshTrackingTab.getByText("Demo Paid", { exact: true })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const admin = await context.newPage();
     await admin.setViewportSize({ width, height: 900 });
@@ -157,8 +177,10 @@ for (const width of [390, 1440]) {
     await expect(admin.getByRole("button", { name: "Move to PREPARING" })).toBeVisible();
     await admin.getByRole("button", { name: "Move to PREPARING" }).click();
     await expect(page.getByText("Preparing", { exact: true }).first()).toBeVisible();
+    await expect(freshTrackingTab.getByText("Preparing", { exact: true }).first()).toBeVisible();
     await admin.getByRole("button", { name: "Move to READY" }).click();
     await expect(page.getByRole("heading", { name: "Ready for pickup", exact: true })).toBeVisible();
+    await expect(freshTrackingTab.getByRole("heading", { name: "Ready for pickup", exact: true })).toBeVisible();
     await admin.getByRole("button", { name: "Move to COMPLETED" }).click();
     await expect(admin).toHaveURL(/\/admin\/orders\?status=PLACED/);
     await admin.goto("/admin");
@@ -168,6 +190,8 @@ for (const width of [390, 1440]) {
     expect(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.reload();
     await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+    await freshTrackingTab.reload();
+    await expect(freshTrackingTab.getByText("Completed", { exact: true }).first()).toBeVisible();
   });
 }
 
@@ -180,6 +204,13 @@ test("unpaid cancellation stays out of admin orders and preserves production sto
   await page.goto("/admin/orders?status=ALL");
   await expect(page.getByRole("link", { name: "DEMO-0001", exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem("fruits-and-roots-cart")!)[0].name)).toBe("Private previous cart");
+});
+
+test("unknown demo order explains browser-local access without using a production token", async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem("fruits-roots-order-token:demo-not-stored", "synthetic-production-token-must-not-be-used"));
+  await page.goto("/order/demo-not-stored");
+  await expect(page.getByRole("alert")).toContainText("This demo order is not stored in this browser");
+  await expect(page.locator("body")).not.toContainText("secure tracking access");
 });
 
 for (const width of [320, 768]) {

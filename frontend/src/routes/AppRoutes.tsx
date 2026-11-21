@@ -24,6 +24,7 @@ import AdminOrders from "../pages/admin/Orders";
 import AdminOrderDetails from "../pages/admin/OrderDetails";
 import MenuManagement from "../pages/admin/MenuManagement";
 import AdminSettings from "../pages/admin/Settings";
+import DemoNotice from "../demo/DemoNotice";
 
 const Page = ({ title }: { title: string }) => (
   <div className="rounded-xl bg-white p-8 shadow-sm">
@@ -68,6 +69,7 @@ function PersistTableFromQrUrl() {
 export default function AppRoutes() {
   return (
     <BrowserRouter>
+      {import.meta.env.VITE_PREVIEW_MODE === "true" && <DemoNotice />}
       <RouteScrollReset />
       <PersistTableFromQrUrl />
       <Routes>
