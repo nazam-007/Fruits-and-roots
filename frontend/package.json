@@ -14,7 +14,8 @@
     "test:e2e:report": "playwright show-report",
     "build:static": "tsc -b && vite build --config vite.static.config.ts",
     "test:static": "playwright test --config playwright.static.config.ts",
-    "test:deployment": "node --experimental-strip-types --test tests/api.test.ts"
+    "test:deployment": "node --experimental-strip-types --test tests/api.test.ts",
+    "test:frontend-preview": "playwright test --config playwright.frontend-preview.config.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
