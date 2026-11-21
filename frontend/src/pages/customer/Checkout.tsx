@@ -6,9 +6,10 @@ import { useCheckout } from "../../context/CheckoutContext";
 import { useMenu } from "../../context/MenuContext";
 import { OrderApiError, submitOrder } from "../../services/ordersApi";
 import type { OrderType } from "../../services/ordersApi";
+import { browserStorageKey, IS_DEMO } from "../../demoMode";
 
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
-const IDEMPOTENCY_STORAGE_KEY = "fruits-roots-payment-idempotency";
+const IDEMPOTENCY_STORAGE_KEY = browserStorageKey("fruits-roots-payment-idempotency");
 
 function isValidOptionalPhone(phone: string) {
   if (!phone) return true;
@@ -58,7 +59,7 @@ export default function Checkout() {
     restaurantStatusError,
   } = useMenu();
   const [customerName, setCustomerName] = useState(
-    checkoutDetails?.customerName ?? "",
+    checkoutDetails?.customerName ?? (IS_DEMO ? "Demo Guest" : ""),
   );
   const [customerPhone, setCustomerPhone] = useState(
     checkoutDetails?.customerPhone ?? "",
@@ -156,7 +157,7 @@ export default function Checkout() {
       const idempotencyKey = await getIdempotencyKey(fingerprint);
       const order = await submitOrder({ ...request, idempotencyKey });
       window.sessionStorage.setItem(
-        `fruits-roots-order-token:${order.orderId}`,
+        browserStorageKey(`fruits-roots-order-token:${order.orderId}`),
         order.trackingToken,
       );
       navigate(`/payment/${order.orderId}`);

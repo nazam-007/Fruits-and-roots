@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { categories, getCategorySlug } from "../../data/menu";
-import { getResponsiveImageSources } from "../../data/menuImages";
+import { getResponsiveImageSources, previewImage } from "../../data/menuImages";
 import ProductCard from "../../components/customer/ProductCard";
 import { useMenu } from "../../context/MenuContext";
 
@@ -83,8 +83,8 @@ export default function Home() {
       <div className="home-page space-y-9 pb-8 sm:space-y-14 md:space-y-16">
         <section className="relative isolate flex min-h-[310px] items-center overflow-hidden rounded-[1.5rem] bg-[#173923] text-white shadow-[0_24px_70px_-36px_rgba(23,57,35,0.75)] sm:min-h-[400px] sm:rounded-[2rem] lg:min-h-[480px]">
           <img
-            src={heroImage}
-            srcSet={getResponsiveImageSources(heroImage, [640, 960, 1280, 1800])}
+            src={previewImage(heroImage)}
+            srcSet={getResponsiveImageSources(previewImage(heroImage), [640, 960, 1280, 1800])}
             sizes="100vw"
             alt="Freshly blended fruit drinks ready to enjoy"
             width="1800"
@@ -178,8 +178,8 @@ export default function Home() {
                   className="group relative isolate flex min-h-36 items-end overflow-hidden rounded-2xl bg-[#31573a] shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-4 sm:min-h-56 sm:rounded-3xl"
                 >
                   <img
-                    src={details.image}
-                    srcSet={getResponsiveImageSources(details.image)}
+                    src={previewImage(details.image)}
+                    srcSet={getResponsiveImageSources(previewImage(details.image))}
                     sizes="(min-width: 1024px) 25vw, 50vw"
                     alt=""
                     width="1000"

@@ -4,6 +4,7 @@ import { ArrowLeft, ArrowRight, Check, Clock3, RefreshCw, ShieldCheck } from "lu
 import MenuItemImage from "../../components/customer/MenuItemImage";
 import RefundStatus from "../../components/RefundStatus";
 import { useMenu } from "../../context/MenuContext";
+import { browserStorageKey } from "../../demoMode";
 import type { MenuItem } from "../../data/menu";
 import {
   cancelOrder,
@@ -66,7 +67,7 @@ export default function OrderTracking() {
     if (!orderId) return null;
     try {
       return window.sessionStorage.getItem(
-        `fruits-roots-order-token:${orderId}`,
+        browserStorageKey(`fruits-roots-order-token:${orderId}`),
       );
     } catch {
       return null;

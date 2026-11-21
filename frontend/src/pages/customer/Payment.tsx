@@ -20,8 +20,9 @@ import {
 } from "../../services/paymentsApi";
 
 import { openRazorpayTestCheckout } from "../../services/razorpayCheckout";
+import { browserStorageKey, IS_DEMO } from "../../demoMode";
 
-const IDEMPOTENCY_STORAGE_KEY = "fruits-roots-payment-idempotency";
+const IDEMPOTENCY_STORAGE_KEY = browserStorageKey("fruits-roots-payment-idempotency");
 const formatPrice = (price: number) => `₹${price.toLocaleString("en-IN")}`;
 
 export default function Payment() {
@@ -34,7 +35,7 @@ export default function Payment() {
     if (!orderId) return null;
     try {
       return window.sessionStorage.getItem(
-        `fruits-roots-order-token:${orderId}`,
+        browserStorageKey(`fruits-roots-order-token:${orderId}`),
       );
     } catch {
       return null;
@@ -98,7 +99,7 @@ export default function Payment() {
       await cancelPendingPayment(orderId, trackingToken);
       try {
         window.sessionStorage.removeItem(IDEMPOTENCY_STORAGE_KEY);
-        window.sessionStorage.removeItem(`fruits-roots-order-token:${orderId}`);
+        window.sessionStorage.removeItem(browserStorageKey(`fruits-roots-order-token:${orderId}`));
       } catch (storageError) {
         console.error("Unable to clear the cancelled checkout session.", storageError);
       }
@@ -293,7 +294,7 @@ export default function Payment() {
             ? "Your payment is confirmed. You can follow preparation on the tracking page."
             : order.paymentStatus === "PENDING_VERIFICATION"
               ? "Your payment reference was received and is awaiting staff verification."
-              : "Scan the QR code using your preferred UPI app."}
+              : IS_DEMO ? "Simulate a payment locally. No money will be transferred." : "Scan the QR code using your preferred UPI app."}
         </p>
         {order.paymentExpiresAt && paymentCanBeCancelled && (
           <p className="mt-2 text-xs text-[#73796d]">
@@ -331,7 +332,7 @@ export default function Payment() {
         <section className="min-w-0 rounded-3xl border border-[#e7e4d8] bg-white p-4 shadow-[0_8px_30px_-25px_rgba(30,51,35,0.5)] sm:p-6">
           <div className="mb-5">
             <p className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-[#b56b36]">
-              {order.paymentSource === "RAZORPAY_TEST" || razorpayOnly ? "Razorpay test payment" : "UPI payment"}
+              {IS_DEMO ? "DEMO PAYMENT" : order.paymentSource === "RAZORPAY_TEST" || razorpayOnly ? "Razorpay test payment" : "UPI payment"}
             </p>
             <h2 className="break-all font-serif text-xl font-semibold text-[#253b2a] sm:text-2xl">
               Order {order.orderNumber}
@@ -358,7 +359,7 @@ export default function Payment() {
               </button>
             </div>
           )}
-          {order.paymentSource === "RAZORPAY_TEST" ? (
+          {IS_DEMO ? <p className="rounded-xl bg-amber-50 p-4 text-sm">DEMO PAYMENT — browser simulation only. No QR, bank transfer or payment provider is used.</p> : order.paymentSource === "RAZORPAY_TEST" ? (
             <p className="rounded-xl bg-amber-50 p-4 text-sm">This checkout uses Razorpay Test Mode. Refresh status after payment; use a new checkout to switch to manual UPI.</p>
           ) : paymentDetails ? (
             <div className="grid gap-5 sm:grid-cols-[minmax(0,1fr)_minmax(220px,280px)] sm:items-center">
@@ -504,11 +505,11 @@ export default function Payment() {
             )
           )}
 
-          <p className="mt-4 text-xs leading-5 text-[#858a7e]">
+          {!IS_DEMO && <p className="mt-4 text-xs leading-5 text-[#858a7e]">
             A displayed QR code or customer action does not prove payment.
             Payment status is only changed by the server’s configured payment
             workflow.
-          </p>
+          </p>}
           {paymentCanBeCancelled && (
             <button
               type="button"
@@ -526,7 +527,7 @@ export default function Payment() {
                 try {
                   window.sessionStorage.removeItem(IDEMPOTENCY_STORAGE_KEY);
                   window.sessionStorage.removeItem(
-                    `fruits-roots-order-token:${orderId}`,
+                    browserStorageKey(`fruits-roots-order-token:${orderId}`),
                   );
                 } catch (storageError) {
                   console.error("Unable to clear the ended checkout session.", storageError);

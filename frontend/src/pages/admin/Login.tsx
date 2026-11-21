@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Leaf } from "lucide-react";
 import { loginAdmin } from "../../services/adminApi";
+import { IS_DEMO } from "../../demoMode";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -48,10 +49,10 @@ export default function Login() {
             Fruits & Roots
           </p>
           <h1 className="mt-2 font-serif text-3xl font-semibold text-[#253b2a]">
-            Admin sign in
+            {IS_DEMO ? "Admin demo" : "Admin sign in"}
           </h1>
           <p className="mt-2 text-sm text-[#73796d]">
-            Sign in to manage pickup orders and payments.
+            {IS_DEMO ? "No real authentication. Manage this browser's simulated orders only." : "Sign in to manage pickup orders and payments."}
           </p>
         </div>
 
@@ -65,7 +66,7 @@ export default function Login() {
         )}
 
         <form onSubmit={(event) => void handleSubmit(event)} className="space-y-4">
-          <div>
+          {!IS_DEMO && <div>
             <label
               htmlFor="admin-username"
               className="mb-1.5 block text-sm font-semibold text-[#394b38]"
@@ -81,8 +82,8 @@ export default function Login() {
               onChange={(event) => setUsername(event.target.value)}
               className="min-h-12 w-full rounded-xl border border-[#e5e2d6] bg-[#fdfcf9] px-4 text-sm text-[#253b2a] outline-none focus:border-[#78916c] focus:ring-2 focus:ring-[#31573a]/15"
             />
-          </div>
-          <div>
+          </div>}
+          {!IS_DEMO && <div>
             <label
               htmlFor="admin-password"
               className="mb-1.5 block text-sm font-semibold text-[#394b38]"
@@ -99,13 +100,13 @@ export default function Login() {
               onChange={(event) => setPassword(event.target.value)}
               className="min-h-12 w-full rounded-xl border border-[#e5e2d6] bg-[#fdfcf9] px-4 text-sm text-[#253b2a] outline-none focus:border-[#78916c] focus:ring-2 focus:ring-[#31573a]/15"
             />
-          </div>
+          </div>}
           <button
             type="submit"
             disabled={loading}
             className="min-h-12 w-full rounded-full bg-[#31573a] px-5 font-semibold text-white transition hover:bg-[#25472e] disabled:cursor-wait disabled:opacity-60"
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading ? "Signing in..." : IS_DEMO ? "Enter admin demo" : "Sign in"}
           </button>
         </form>
       </section>

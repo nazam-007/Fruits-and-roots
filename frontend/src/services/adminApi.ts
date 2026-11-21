@@ -2,6 +2,7 @@ import type { OpeningHours, RestaurantOrderingStatus } from "./menuApi";
 import type { RefundInfo } from "../components/RefundStatus";
 
 import { API_URL } from "./api";
+import { appFetch as fetch } from "./transport";
 
 export type AdminOrderStatus =
   | "PLACED"

@@ -12,9 +12,10 @@ import {
   type CartContextType,
   type CartItem,
 } from "./cartContextStore";
+import { browserStorageKey } from "../demoMode";
 
 const MAX_QUANTITY = 99;
-const CART_STORAGE_KEY = "fruits-and-roots-cart";
+const CART_STORAGE_KEY = browserStorageKey("fruits-and-roots-cart");
 
 function isCartItem(value: unknown): value is CartItem {
   if (typeof value !== "object" || value === null) return false;

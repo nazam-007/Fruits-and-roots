@@ -132,15 +132,20 @@ export function MenuProvider({
       () => void refreshRestaurantStatus(),
       0,
     );
-    const menuEvents = new EventSource(`${API_URL}/api/menu/events`);
+    const menuEvents = import.meta.env.VITE_PREVIEW_MODE === "true" ? null : new EventSource(`${API_URL}/api/menu/events`);
     const refreshOnCatalogChange = () => void refreshMenu(true);
     const refreshOnRestaurantStatusChange = () =>
       void refreshRestaurantStatus();
-    menuEvents.addEventListener("catalog-changed", refreshOnCatalogChange);
-    menuEvents.addEventListener(
+    menuEvents?.addEventListener("catalog-changed", refreshOnCatalogChange);
+    menuEvents?.addEventListener(
       "restaurant-status-changed",
       refreshOnRestaurantStatusChange,
     );
+    const refreshDemo = () => { refreshOnCatalogChange(); refreshOnRestaurantStatusChange(); };
+    if (import.meta.env.VITE_PREVIEW_MODE === "true") {
+      window.addEventListener("fr-demo-change", refreshDemo);
+      window.addEventListener("storage", refreshDemo);
+    }
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") {
         void refreshMenu(true);
@@ -158,12 +163,14 @@ export function MenuProvider({
       window.clearTimeout(initialLoad);
       window.clearTimeout(initialStatusLoad);
       window.clearInterval(interval);
-      menuEvents.removeEventListener("catalog-changed", refreshOnCatalogChange);
-      menuEvents.removeEventListener(
+      menuEvents?.removeEventListener("catalog-changed", refreshOnCatalogChange);
+      menuEvents?.removeEventListener(
         "restaurant-status-changed",
         refreshOnRestaurantStatusChange,
       );
-      menuEvents.close();
+      menuEvents?.close();
+      window.removeEventListener("fr-demo-change", refreshDemo);
+      window.removeEventListener("storage", refreshDemo);
       document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   }, [refreshMenu, refreshRestaurantStatus]);

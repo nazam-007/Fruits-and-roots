@@ -12,6 +12,17 @@ export function useOrderStatusUpdates(
   refreshStatus: () => Promise<void>,
 ) {
   useEffect(() => {
+    if (import.meta.env.VITE_PREVIEW_MODE === "true") {
+      const refresh = () => { if (!document.hidden) void refreshStatus(); };
+      window.addEventListener("fr-demo-change", refresh);
+      window.addEventListener("storage", refresh);
+      document.addEventListener("visibilitychange", refresh);
+      return () => {
+        window.removeEventListener("fr-demo-change", refresh);
+        window.removeEventListener("storage", refresh);
+        document.removeEventListener("visibilitychange", refresh);
+      };
+    }
     if (
       !orderId ||
       !trackingToken ||

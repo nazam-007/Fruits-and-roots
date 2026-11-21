@@ -5,6 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { browserStorageKey } from "../demoMode";
 
 export type CheckoutDetails = {
   customerName: string;
@@ -17,7 +18,7 @@ type CheckoutContextValue = {
   clearCheckoutDetails: () => void;
 };
 
-const STORAGE_KEY = "fruits-roots-checkout-details";
+const STORAGE_KEY = browserStorageKey("fruits-roots-checkout-details");
 const CheckoutContext = createContext<CheckoutContextValue | undefined>(
   undefined,
 );

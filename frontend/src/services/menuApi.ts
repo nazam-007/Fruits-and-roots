@@ -2,6 +2,7 @@
 import type { MenuItem } from "../data/menu";
 
 import { API_URL } from "./api";
+import { appFetch as fetch } from "./transport";
 
 export type RestaurantOrderingStatus = {
   acceptingOrders: boolean;

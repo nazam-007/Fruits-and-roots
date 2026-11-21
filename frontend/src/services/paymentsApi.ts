@@ -1,4 +1,5 @@
 import { API_URL } from "./api";
+import { appFetch as fetch } from "./transport";
 
 async function readResponse<T>(response: Response): Promise<T> {
   const data = await response.json().catch(() => null);

@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig(({ mode }) => {
   const flag = loadEnv(mode, process.cwd(), "VITE_").VITE_PREVIEW_MODE;
@@ -9,12 +10,17 @@ export default defineConfig(({ mode }) => {
   }
   const preview = flag === "true";
   return {
+  resolve: { alias: preview ? [
+    { find: /^(?:\.\.\/)+services\/razorpayCheckout$/, replacement: fileURLToPath(new URL("./src/demo/paymentDisabled.ts", import.meta.url)) },
+    { find: /^\.\/api$/, replacement: fileURLToPath(new URL("./src/demo/api.ts", import.meta.url)) },
+    { find: /^(?:\.\.\/)+services\/api$/, replacement: fileURLToPath(new URL("./src/demo/api.ts", import.meta.url)) },
+  ] : [] },
   plugins: [react(), tailwindcss(), {
     name: "frontend-only-preview",
     transformIndexHtml(html) {
       if (!preview) return html;
       return {
-        html: html.replace("Fresh juices, fruit bowls, choco waffles and toasties at Fruits & Roots. Explore the menu and order from your table.", "Fruits & Roots sample menu preview. Ordering coming soon."),
+        html: html.replace("Fresh juices, fruit bowls, choco waffles and toasties at Fruits & Roots. Explore the menu and order from your table.", "Fruits & Roots browser-local demo. No real payments or orders are processed."),
         tags: [{ tag: "meta", attrs: {
           "http-equiv": "Content-Security-Policy",
           content: "default-src 'self'; connect-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'self'",

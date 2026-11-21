@@ -1,7 +1,14 @@
 import type { MenuItem } from "./menu";
 
-const imageUrl = (photoId: string) =>
-  `https://images.unsplash.com/photo-${photoId}?auto=format&fit=crop&w=900&q=85`;
+const imageUrl = (photoId: string) => import.meta.env.VITE_PREVIEW_MODE === "true"
+  ? `/demo-menu/${photoId}.jpg`
+  : `https://images.unsplash.com/photo-${photoId}?auto=format&fit=crop&w=900&q=85`;
+
+export function previewImage(image: string): string {
+  if (import.meta.env.VITE_PREVIEW_MODE !== "true") return image;
+  const id = image.match(/^https:\/\/images\.unsplash\.com\/photo-([a-z0-9-]+)/)?.[1];
+  return id ? `/demo-menu/${id}.jpg` : image.startsWith("/") && !image.startsWith("//") ? image : "";
+}
 
 const menuItemImages: Record<string, string> = {
   "drink-banana": imageUrl("1571771894821-ce9b6c11b08e"),
@@ -35,6 +42,7 @@ const menuItemImages: Record<string, string> = {
 };
 
 export function getMenuItemImage(item: MenuItem): string | undefined {
+  if (import.meta.env.VITE_PREVIEW_MODE === "true") return item.image ? previewImage(item.image) || menuItemImages[item.id] : menuItemImages[item.id];
   return item.image ?? menuItemImages[item.id];
 }
 
