@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import {
   fetchAdminOrder,
+  recordCounterPayment,
   updateAdminOrderStatus,
   verifyAdminPayment,
   recordAdminRefund,
@@ -32,6 +33,7 @@ const nextStatus: Partial<Record<AdminOrderLifecycleStatus, "PREPARING" | "READY
 };
 
 export default function AdminOrderDetails() {
+  const [counterBusy, setCounterBusy] = useState(false);
   const { orderId } = useParams<{ orderId: string }>();
   const location = useLocation();
   const navigate = useNavigate();
@@ -193,6 +195,7 @@ export default function AdminOrderDetails() {
 
   const suggestedStatus = nextStatus[order.order_status];
   const canStartPreparation =
+    (order.payment_source === "PAY_AT_COUNTER" && ["UNPAID", "PAID"].includes(order.payment_status)) ||
     order.payment_status === "PAID" &&
     (order.payment_source === "MANUAL_UPI" ||
       (order.payment_source === "DEMO" && order.demoPaymentsEnabled) ||
@@ -267,7 +270,7 @@ export default function AdminOrderDetails() {
           <h2 className="font-serif text-xl font-semibold text-[#253b2a]">Payment</h2>
           <dl className="mt-4 space-y-3 text-sm">
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Status</dt><dd className="text-right font-semibold">{order.payment_source === "DEMO" && order.payment_status === "PAID" ? "Demo Paid" : order.payment_status.replaceAll("_", " ")}</dd></div>
-            <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Method</dt><dd className="text-right font-medium">{order.payment_source === "MANUAL_UPI" ? "UPI" : "—"}</dd></div>
+            <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Method</dt><dd className="text-right font-medium">{order.payment_source === "PAY_AT_COUNTER" ? "Pay at Counter" : order.payment_source === "MANUAL_UPI" ? "UPI" : "—"}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Source</dt><dd className="text-right font-semibold">{order.payment_source === "DEMO" ? "DEMO PAYMENT" : order.payment_source ?? "—"}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Customer-reported reference</dt><dd className="max-w-[65%] break-all text-right font-medium">{order.transaction_reference ?? "—"}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-[#73796d]">Verified reference</dt><dd className="max-w-[65%] break-all text-right font-medium">{order.verified_transaction_reference ?? "—"}</dd></div>
@@ -365,6 +368,15 @@ export default function AdminOrderDetails() {
             </button>
           )}
         </div>
+        {order.payment_source === "PAY_AT_COUNTER" && order.payment_status === "UNPAID" && order.order_status !== "CANCELLED" && (
+          <button type="button" disabled={counterBusy} className="rounded-xl bg-[#31573a] px-4 py-3 font-semibold text-white disabled:opacity-50" onClick={async () => {
+            if (counterBusy || !window.confirm("Confirm that you have received the full payment at the counter?")) return;
+            setCounterBusy(true);
+            try { await recordCounterPayment(order.id); setOrder(await fetchAdminOrder(order.id)); }
+            catch (error) { window.alert(error instanceof Error ? error.message : "Unable to record payment."); }
+            finally { setCounterBusy(false); }
+          }}>Mark counter payment received</button>
+        )}
         <RefundStatus refund={order.refund} paidCancelled={order.order_status === "CANCELLED" && order.payment_status === "PAID" && order.payment_source !== "DEMO"} />
         {order.refund?.status === "COMPLETED" && <div className="my-3 space-y-2 break-words text-sm">
           <p>Refund reference: {order.refund.reference} · Recorded by: {order.refund.recordedBy}</p>

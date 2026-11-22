@@ -4,7 +4,7 @@ This is not the customer ordering API. The existing Render Static Site stays unc
 
 ## Why a separate entry point
 
-Normal `src/server.ts` imports `db.ts`, which loads dotenv and requires DATABASE_URL before Express starts. Normal listening also starts the legacy pending-payment expiry worker. Do not use `npm start`, `npm run dev`, `start:preview` or the Razorpay diagnostic entry for this deployment.
+Normal `src/server.ts` imports `db.ts`, which loads dotenv and requires DATABASE_URL before Express starts. Full-server startup now verifies the restricted database identity, CA-validated TLS and runtime permissions before listening. The legacy pending-payment expiry worker starts only with PAYMENT_EXPIRY_WORKER_ENABLED=true, after readiness passes. Do not use `npm start`, `npm run dev`, `start:preview` or the Razorpay diagnostic entry for this deployment.
 
 `src/stagingServer.ts` imports only Express, Helmet and the dependency-free shutdown helper. It does not load dotenv, pg, application routes, frontend hosting, Supabase clients, payment code or workers. It requires STAGING_HEALTH_ONLY=true and refuses nonempty application credential/database variables or enabled payment/frontend flags. No background scheduler starts. The normal production entry is unchanged.
 

@@ -162,3 +162,13 @@ test("no pending refund cannot be completed and customer projection excludes adm
   assert.ok(!refundProjection("p").includes("evidence_note"));
   assert.ok(refundProjection("p", true).includes("evidence_note"));
 });
+
+
+test("counter cancellation requires no refund when unpaid and preserves full evidence when paid", async () => {
+  const unpaid = fixture(); unpaid.set({ payment_status: "UNPAID" }); unpaid.payment({ payment_source: "PAY_AT_COUNTER", payment_status: "UNPAID" });
+  const cancelled = await cancelWithRefund(unpaid.db, id, hash);
+  assert.equal(cancelled.refundReviewRequired, false);
+  assert.equal(unpaid.state().payment.refund_status, "NONE");
+  const paid = fixture(); paid.payment({ payment_source: "PAY_AT_COUNTER", verified_transaction_reference: `COUNTER-${id}` });
+  assert.equal((await cancelWithRefund(paid.db, id, hash)).refundReviewRequired, true);
+});

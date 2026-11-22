@@ -1,5 +1,7 @@
 # Full Fruits & Roots application — restored defaults and deployment plan
 
+Current integration scope: real ordering uses Pay at Counter; Razorpay/online gateways stay disabled. Phase 2 and Phase 3 below supersede earlier dated payment-scope and automatic-worker descriptions. The existing frontend demo and deployed services remain unchanged.
+
 2026-11-14. Full customer/admin ordering application is the intended release. Static QR menu and database-backed menu preview are optional experiments, NOT default deployment targets. No database connection, role/record/configuration change, live payment, application restart or deployment occurred in this task.
 
 ## Local commands and configuration stop points
@@ -62,3 +64,40 @@ Production database connections retain verify-full TLS and 10s acquisition timeo
 SIGTERM/SIGINT use one shutdown promise: stop ingress and expiry scheduling, end SSE streams/idle HTTP connections, await HTTP drainage and the active expiry operation, then close the pool. The worker starts only after successful HTTP binding. A 25s deadline or cleanup failure logs a fixed stage, destroys HTTP connections and exits unsuccessfully. Forced termination/connection loss cannot guarantee request completion; preserve transaction/idempotency recovery procedures. Diagnostic/test launchers remain unchanged. DB health logging emits only fixed metadata and allowlisted codes; process health does not establish database readiness.
 
 Lightweight checks: backend `npm run test:deployment`; frontend `npm run test:deployment`; sequential no-emit TypeScript checks. Full browser suites/builds remain deferred on the resource-limited laptop. SQL files and actual environment values were untouched. Backups, approved runtime-role/client-isolation work, upstream TLS assessment and staging smoke tests remain blockers. Normal startup still runs expiry writes: do not start/deploy against original records under code-only approval. Test Razorpay remains forbidden in production; free sleeping Render services remain staging-only.
+
+
+## Phase 2: Pay at Counter (local implementation; not deployed)
+
+Normal checkout explicitly submits `paymentMethod: PAY_AT_COUNTER` to `POST /api/orders`; production requires it. Existing server pricing/availability checks, idempotency, database-generated order numbers and secure tracking remain. Counter orders are saved as PLACED with UNPAID payment records in the existing transaction and open `/order/:id` directly. Browser-local demo mode remains unchanged.
+
+Authenticated staff can progress PLACED -> PREPARING -> READY -> COMPLETED independently of payment. `POST /api/admin/orders/:id/counter-payment` requires the existing admin cookie/origin protections and `{ "received": true }`. It records staff identity, timestamp and an internal counter receipt reference. Staff must independently receive the full payment first; the endpoint transfers no money. Duplicate confirmation is idempotent. Receipt, cancellation and preparation lock order first, payment second. Cancelled orders cannot receive new payments. Paid counter cancellations use existing manual refund tracking; unpaid cancellations create no refund obligation.
+
+Separate approval is required for `backend/migrations/018_pay_at_counter.sql`. It extends existing status/source/refund CHECK constraints; no new columns/tables, backfill or record updates. Requires 000-017 already applied; do not rerun them. Validate target metadata first. Changes are transactional with short timeouts and may lock tables. Reverting constraints after counter records exist requires a separately reviewed data-compatible plan.
+
+Production settings: VITE_PREVIEW_MODE=false, VITE_MENU_PREVIEW=false, SERVE_FRONTEND=true, NODE_ENV=production, RAZORPAY_MODE=off, DEMO_PAYMENTS_ENABLED=false. Leave merchant UPI configuration unset. Production quotes/tracking expose no live merchant QR; manual online claims are disabled. Razorpay/demo endpoints retain production gates. The expiry worker never expires UNPAID orders. It is now disabled by default; enable it only with PAYMENT_EXPIRY_WORKER_ENABLED=true after readiness and legacy-record review.
+
+Remaining prerequisites: approved migration 018, verified restricted runtime connection with certificate/hostname validation, approved client isolation, same-origin admin hosting, and real PostgreSQL staging verification. A Render Static Site alone cannot persist real orders/authenticate staff; deploy the existing single Express service serving the full frontend. Local mocked tests do not prove live database or cross-device behavior. No gateway or automatic refunds are enabled.
+
+## Phase 3: fail-closed application startup (local implementation)
+
+The full `server.ts` entry verifies a real restricted connection before binding HTTP. Production application pools reject administrative DATABASE_URL usernames before pool creation. Direct `fruits_roots_backend` and project-qualified `fruits_roots_backend.<20-letter-project-ref>` pooler users are accepted; this username validation does not independently establish the Supabase project's identity. Independently verify the target endpoint before provisioning configuration. URLs must include a database name and contain no query overrides or fragments. Runtime startup requires verify-full TLS and a nonempty configured DATABASE_CA_CERT_PATH, including controlled local starts. The generic database-config helper remains available to separately authorized administrative inspection tools; it is not the production application pool path.
+
+Readiness checks the actual socket's encryption, authorized CA chain and certificate hostname, then uses one BEGIN READ ONLY transaction with short local timeouts. It verifies current_user/session_user, the URL's database name, LOGIN/NOINHERIT and absence of superuser/BYPASSRLS/CREATEDB/CREATEROLE/replication. Metadata-only permission checks cover migration 014's eleven tables, required column lock permission, four runtime sequence USAGE grants, RLS access policies, and absence of sensitive extra mutation/CREATE/sequence UPDATE rights and outbound role memberships. Administrative memberships INTO the runtime role are not confused with privileges granted TO the runtime role. Required privileges are checked individually; PostgreSQL comma-separated privilege checks mean ANY, not ALL. The transaction is rolled back before a successful connection is released. Failed connections are discarded; startup errors contain no raw database messages or credentials.
+
+These metadata checks are a startup gate, not proof that live customer/admin workflows or every possible restrictive RLS policy work. The metadata SQL and Supabase pooler behavior still need separately approved real-database verification. No application table rows are read during readiness; no schema/role/permission changes are performed.
+
+PAYMENT_EXPIRY_WORKER_ENABLED defaults to false in every environment. Set exactly true only after readiness, legacy-record review and separate operational approval. Invalid flag values fail startup. PENDING_PAYMENT_EXPIRY_MINUTES retains its existing meaning when the worker is enabled. Online expiry continues to affect only PENDING_PAYMENT/PENDING_VERIFICATION, never UNPAID Pay at Counter orders. No periodic expiry is promised while the worker is disabled or the service sleeps.
+
+Keep PAYMENT_EXPIRY_WORKER_ENABLED=false during controlled production verification, NODE_ENV=production, RAZORPAY_MODE=off and DEMO_PAYMENTS_ENABLED=false. Provision the restricted DATABASE_URL and verified official CA privately only after authentication/security approval. The deployed health-only staging entry is unchanged, does not import this readiness module or database code, and still needs no credentials. Do not add application credentials to that staging service.
+
+Local database-free checks from backend:
+
+```sh
+npm run build
+node --import tsx --test --test-concurrency=1 src/productionStartup.test.ts src/stagingServer.test.ts src/deployment.test.ts src/databaseConfig.test.ts
+npm test
+```
+
+This integration worktree combines the reviewed Pay at Counter implementation, migration 018 proposal and production startup safeguards. Source checkouts are preserved. Startup tests run explicitly because backend/package.json and recovery-package changes are excluded. Migration 018 remains unexecuted; no database changes or deployment are authorized by code integration.
+
+Startup cleanup is registered before allocating resources. HTTP business requests remain blocked until initialization completes. Synchronous worker throws and asynchronous rejections close the listener, stop/drain tracked worker work and close the pool through the shared shutdown promise. Timer allocation/unref failures cannot leave a database run queued. Worker initialization remains after binding to prevent immediate expiry writes when HTTP binding fails. Health-only staging remains isolated.

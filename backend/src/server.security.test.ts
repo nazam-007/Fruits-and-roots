@@ -110,11 +110,11 @@ test("checkout permits valid Razorpay test configuration without UPI and preserv
       assert.equal((await response.json()).message, "UPI payment is not configured.");
       assert.equal(statements.length, before);
     });
-    await t.test("production cannot use test mode to bypass missing UPI", async () => {
+    await t.test("production requires explicit Pay at Counter and cannot start online checkout", async () => {
       process.env.RAZORPAY_MODE = "test";
       process.env.NODE_ENV = "production";
       const before = statements.length;
-      assert.equal((await submit()).status, 503);
+      assert.equal((await submit()).status, 400);
       assert.equal(statements.length, before);
       process.env.NODE_ENV = "test";
     });
@@ -1224,4 +1224,100 @@ test("CORS does not grant an unapproved origin and Helmet security headers are p
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(response.headers.get("x-frame-options"), "SAMEORIGIN");
   assert.equal(response.headers.get("strict-transport-security"), null);
+});
+
+
+test("counter checkout validates server prices, retries and secure tracking without online configuration", async () => {
+  const { app } = await import("./server.js");
+  const oldNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  const oldProxy = app.get("trust proxy"); app.set("trust proxy", ["loopback"]);
+  const oldConnect = database.connect, oldQuery = database.query;
+  let requestNumber = 0;
+  const id = "00000000-0000-4000-8000-000000000871";
+  let available = true, prior = false, tokenHash = "", requestHash = "", inserts = 0;
+  const statements: string[] = [];
+  const order = { id, order_number: "FR-COUNTER", customer_name: "Counter Fixture", fulfillment_type: "PICKUP",
+    order_type: "TAKEAWAY", table_number: null, total_amount: 240, payment_status: "UNPAID", payment_source: "PAY_AT_COUNTER",
+    order_status: "PLACED", created_at: new Date(), items: [] };
+  const client = { query: async (sql: string, values?: unknown[]) => {
+    statements.push(sql);
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+    if (sql.includes("FROM orders WHERE idempotency_key")) return { rows: prior ? [{ request_hash: requestHash, tracking_token_hash: tokenHash, payment_status: "UNPAID" }] : [] };
+    if (sql.includes("FROM public.restaurant_settings")) return { rows: [{ accepting_orders: true, opening_hours: openAllWeek }] };
+    if (sql.includes("FROM products p")) return { rows: [{ product_id: "counter-fixture", product_name: "Fixture", available, size: "Regular", price: 120 }] };
+    if (sql.includes("INSERT INTO orders")) { assert.match(sql, /'UNPAID', 'PLACED'/); assert.equal(values?.[6], 240); requestHash = values?.[8] as string; tokenHash = values?.[9] as string; inserts++; return { rows: [{ id }] }; }
+    if (sql.includes("INSERT INTO payments")) { assert.match(sql, /'UNPAID', 'PAY_AT_COUNTER'/); return { rows: [] }; }
+    if (sql.includes("INSERT INTO order_items")) return { rows: [] };
+    if (sql.includes("FROM orders o")) return { rows: [order] };
+    throw Error("Unexpected counter fixture SQL");
+  }, release: () => {} };
+  database.connect = (async () => client) as unknown as Pool["connect"];
+  database.query = (async (sql: string) => ({ rows: sql.includes("SELECT tracking_token_hash") ? [{ tracking_token_hash: tokenHash }] : [order] })) as unknown as Pool["query"];
+  const body = { customerName: "Counter Fixture", paymentMethod: "PAY_AT_COUNTER", totalAmount: 1, paymentStatus: "PAID",
+    idempotencyKey: "00000000-0000-4000-8000-000000000872", items: [{ productId: "counter-fixture", size: "Regular", quantity: 2 }] };
+  const send = (input = body) => fetch(`${baseUrl}/api/orders`, { method: "POST", headers: { "Content-Type": "application/json", "X-Forwarded-For": `203.0.113.${++requestNumber}` }, body: JSON.stringify(input) });
+  try {
+    const config = await (await fetch(`${baseUrl}/api/payment-config`)).json();
+    assert.equal(config.configured, false); assert.equal(config.upiId, undefined); assert.equal(config.demoPaymentsEnabled, false); assert.equal(config.razorpayTestEnabled, false);
+    assert.equal((await fetch(`${baseUrl}/api/orders/${id}/payment-claim`, { method: "POST", headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.250" }, body: '{}' })).status, 404);
+    available = false; assert.equal((await send()).status, 400); assert.equal(inserts, 0);
+    available = true; const response = await send(); assert.equal(response.status, 201); const created = await response.json();
+    assert.equal(created.paymentStatus, "UNPAID"); assert.equal(created.orderStatus, "PLACED"); assert.equal(created.totalAmount, 240); assert.ok(created.trackingToken);
+    prior = true; assert.equal((await send()).status, 200); assert.equal(inserts, 1);
+    assert.equal((await send({ ...body, customerName: "Different customer" })).status, 409);
+    assert.equal((await fetch(`${baseUrl}/api/orders/${id}`)).status, 404);
+    assert.equal((await fetch(`${baseUrl}/api/orders/${id}`, { headers: { Authorization: `Bearer ${"x".repeat(43)}` } })).status, 404);
+    const tracking = await fetch(`${baseUrl}/api/orders/${id}`, { headers: { Authorization: `Bearer ${created.trackingToken}` } });
+    assert.equal(tracking.status, 200); assert.equal((await tracking.json()).paymentDetails, null);
+    assert.ok(!statements.some(sql => sql.includes("UPDATE payments")));
+  } finally { database.connect = oldConnect; database.query = oldQuery; app.set("trust proxy", oldProxy); process.env.NODE_ENV = oldNodeEnv; }
+});
+
+test("counter receipt requires admin, explicit evidence, consistent records and is idempotent; preparation stays independent", async () => {
+  const oldConnect = database.connect, oldQuery = database.query;
+  const id = "00000000-0000-4000-8000-000000000873";
+  let status = "PLACED", paid = false, mutations = 0, source = "PAY_AT_COUNTER";
+  const statements: string[] = [];
+  database.query = (async () => ({ rows: [{ admin_id: "counter-staff" }] })) as unknown as Pool["query"];
+  database.connect = (async () => ({ query: async (sql: string, values?: unknown[]) => {
+    statements.push(sql);
+    if (["BEGIN", "COMMIT", "ROLLBACK"].includes(sql)) return { rows: [] };
+    if (sql.includes("FROM orders WHERE id=$1 FOR UPDATE")) return { rows: [{ id, order_status: status, payment_status: paid ? "PAID" : "UNPAID", total_amount: 120 }] };
+    if (sql.includes("FROM payments p")) return { rows: [{ payment_source: source, payment_status: paid ? "PAID" : "UNPAID", reconciliation_required: false, verified_at: paid ? "2026-01-01" : null, verified_by: paid ? "counter-staff" : null }] };
+    if (sql.startsWith("UPDATE orders SET order_status")) { status = values?.[1] as string; return { rows: [] }; }
+    if (sql.startsWith("UPDATE payments SET payment_status='PAID'")) { assert.equal(values?.[1], "counter-staff"); assert.equal(values?.[2], `COUNTER-${id}`); mutations++; paid = true; return { rows: [] }; }
+    if (sql.startsWith("UPDATE orders SET payment_status='PAID'")) return { rows: [] };
+    throw Error("Unexpected counter receipt SQL");
+  }, release: () => {} })) as unknown as Pool["connect"];
+  const headers = { "Content-Type": "application/json", Cookie: `fr_admin_session=${"a".repeat(48)}` };
+  const receipt = (received: boolean) => fetch(`${baseUrl}/api/admin/orders/${id}/counter-payment`, { method: "POST", headers, body: JSON.stringify({ received }) });
+  const prepare = (next: string) => fetch(`${baseUrl}/api/admin/orders/${id}/status`, { method: "PATCH", headers, body: JSON.stringify({ status: next }) });
+  try {
+    assert.equal((await fetch(`${baseUrl}/api/admin/orders/${id}/counter-payment`, { method: "POST", headers: { "Content-Type": "application/json" }, body: '{"received":true}' })).status, 401);
+    assert.equal((await receipt(false)).status, 400);
+    assert.equal((await prepare("PREPARING")).status, 200); assert.equal(paid, false);
+    assert.equal((await prepare("READY")).status, 200); assert.equal((await prepare("COMPLETED")).status, 200);
+    assert.equal((await receipt(true)).status, 200); assert.equal(mutations, 1); assert.equal(status, "COMPLETED");
+    assert.equal((await receipt(true)).status, 200); assert.equal(mutations, 1);
+    status = "CANCELLED"; assert.equal((await receipt(true)).status, 409);
+    status = "PLACED"; source = "MANUAL_UPI"; assert.equal((await receipt(true)).status, 409);
+    assert.ok(statements.indexOf("SELECT id,order_status,payment_status,total_amount,tracking_token_hash FROM orders WHERE id=$1 FOR UPDATE") < statements.findIndex(sql => sql.includes("FROM payments p")));
+  } finally { database.connect = oldConnect; database.query = oldQuery; }
+});
+
+
+test("counter migration is constraint-only and expiry excludes unpaid counter orders", async () => {
+  const { readFileSync } = await import("node:fs");
+  const sql = readFileSync("migrations/018_pay_at_counter.sql", "utf8").replace(/--[^\n]*/g, "");
+  assert.match(sql, /^\s*BEGIN;/); assert.match(sql, /COMMIT;\s*$/);
+  assert.doesNotMatch(sql, /\b(?:UPDATE|DELETE|INSERT|TRUNCATE|ADD COLUMN|CREATE TABLE)\b/i);
+  assert.match(sql, /'PAY_AT_COUNTER'/); assert.match(sql, /\) IS TRUE\)/);
+  const expiry = readFileSync("src/paymentExpiry.ts", "utf8");
+  assert.match(expiry, /WHERE payment_status IN \('PENDING_PAYMENT', 'PENDING_VERIFICATION'\)/);
+  assert.ok(!expiry.includes("'UNPAID'"));
+  const { operationalPaymentPredicate } = await import("./operationalOrders.js");
+  const predicate = operationalPaymentPredicate("o");
+  assert.match(predicate, /counter_payment.payment_source='PAY_AT_COUNTER'/);
+  assert.match(predicate, /counter_payment.payment_status=o.payment_status/);
 });

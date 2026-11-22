@@ -47,8 +47,8 @@ async function getIdempotencyKey(fingerprint: string) {
 
 export default function Checkout() {
   const navigate = useNavigate();
-  const { cart, cartCount } = useCart();
-  const { checkoutDetails, saveCheckoutDetails } = useCheckout();
+  const { cart, cartCount, clearCart } = useCart();
+  const { checkoutDetails, saveCheckoutDetails, clearCheckoutDetails } = useCheckout();
   const {
     menuItems,
     loading: menuLoading,
@@ -69,6 +69,7 @@ export default function Checkout() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  const placedRef = useRef(false);
   const checkoutItems = cart.map((item) => {
     const product = menuItems.find((menuItem) => menuItem.id === item.id);
     const variant = product?.variants.find((menuVariant) => menuVariant.size === item.size);
@@ -89,7 +90,7 @@ export default function Checkout() {
   );
 
   useEffect(() => {
-    if (cart.length === 0) navigate("/cart", { replace: true });
+    if (cart.length === 0 && !placedRef.current) navigate("/cart", { replace: true });
   }, [cart.length, navigate]);
 
   const handleContinue = async (event: FormEvent<HTMLFormElement>) => {
@@ -141,6 +142,7 @@ export default function Checkout() {
       submittingRef.current = true;
       setSubmitting(true);
       const request = {
+        ...(!IS_DEMO ? { paymentMethod: "PAY_AT_COUNTER" as const } : {}),
         customerName: name,
         ...(phone ? { customerPhone: phone } : {}),
         orderType,
@@ -160,7 +162,15 @@ export default function Checkout() {
         browserStorageKey(`fruits-roots-order-token:${order.orderId}`),
         order.trackingToken,
       );
-      navigate(`/payment/${order.orderId}`);
+      if (order.paymentSource === "PAY_AT_COUNTER") {
+        window.sessionStorage.removeItem(IDEMPOTENCY_STORAGE_KEY);
+        placedRef.current = true;
+        clearCart();
+        clearCheckoutDetails();
+        navigate(`/order/${order.orderId}`);
+      } else {
+        navigate(`/payment/${order.orderId}`);
+      }
     } catch (error) {
       if (
         error instanceof OrderApiError &&
@@ -212,6 +222,8 @@ export default function Checkout() {
           Complete your order for dine-in or takeaway.
         </p>
       </div>
+
+      {!IS_DEMO && <p className="mb-5 rounded-xl border border-[#e7e4d8] bg-white p-4"><strong>Pay at Counter</strong> — Place your order now and pay staff at the café. No online payment is required.</p>}
 
       {formError && (
         <p
@@ -369,7 +381,7 @@ export default function Checkout() {
             }
             className="mt-6 hidden min-h-12 w-full items-center justify-center gap-2 rounded-full bg-[#31573a] px-6 py-3 font-semibold text-white transition hover:-translate-y-0.5 hover:bg-[#25472e] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2 sm:inline-flex"
           >
-            {submitting ? "Creating your order..." : "Continue to Payment"}
+            {submitting ? "Creating your order..." : IS_DEMO ? "Continue to Payment" : "Place order — Pay at Counter"}
             {!submitting && <ArrowRight size={17} aria-hidden="true" />}
           </button>
           {menuLoading && (
@@ -480,7 +492,7 @@ export default function Checkout() {
           className="mx-auto flex min-h-12 w-full max-w-lg items-center justify-between gap-3 rounded-full bg-[#31573a] px-5 font-semibold text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#b56b36] focus-visible:ring-offset-2"
         >
           <span className="inline-flex items-center gap-2">
-            {submitting ? "Creating your order..." : "Continue to Payment"}
+            {submitting ? "Creating your order..." : IS_DEMO ? "Continue to Payment" : "Place order — Pay at Counter"}
             {!submitting && <ArrowRight size={17} aria-hidden="true" />}
           </span>
           <span className="tabular-nums">{formatPrice(currentCartTotal)}</span>

@@ -14,13 +14,15 @@ import { resolve } from "node:path";
 import { frontendOrigins, trustedProxyIps, databaseHealthDiagnostic } from "./deploymentConfig";
 import { mountFrontend } from "./frontendHosting";
 import { gracefulShutdown, registerShutdownSignals } from "./serverLifecycle";
+import { paymentExpiryWorkerEnabled, startVerifiedRuntime, verifyDatabaseReadiness } from "./productionStartup";
 
 razorpayConfig(); // Fail closed for live keys or test mode in production.
 const app = express();
 let shuttingDown = false;
+let starting = require.main === module;
 const responses = new Set<express.Response>();
 app.use((_req, res, next) => {
-  if (shuttingDown) {
+  if (shuttingDown || starting) {
     res.setHeader("Connection", "close");
     res.status(503).json({ message: "Service restarting." });
     return;
@@ -103,37 +105,74 @@ mountFrontend(app, resolve(__dirname, "../../frontend/dist"), process.env.SERVE_
 
 export { app };
 
-if (require.main === module) {
-  getPendingPaymentExpiryMinutes();
+async function startApplication() {
+  let server: import("node:http").Server | undefined;
   let worker: ReturnType<typeof startPendingPaymentExpiryWorker> | undefined;
-  const server = app.listen(PORT, () => {
-    if (shuttingDown) return;
-    // A failed/duplicate listener must not start a second database-writing worker.
-    worker = startPendingPaymentExpiryWorker();
-    console.log(`Fruits & Roots backend running at http://localhost:${PORT}`);
-  });
+  // Install ownership/cleanup before readiness, binding or worker allocation.
   const shutdown = gracefulShutdown({
     stopHttp: () => {
       shuttingDown = true;
+      if (!server) return Promise.resolve();
       const closed = new Promise<void>((resolveClose, reject) => {
-        server.close(error => error ? reject(error) : resolveClose());
+        server!.close(error => error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING"
+          ? reject(error) : resolveClose());
       });
       // SSE clients reconnect after restart; ordinary requests drain normally.
       for (const res of responses) {
         if (String(res.getHeader("Content-Type") || "").startsWith("text/event-stream")) res.end();
       }
       server.closeIdleConnections();
+      // Failed startup must not wait for clients holding incomplete requests.
+      if (starting) server.closeAllConnections();
       return closed;
     },
     stopWorker: async () => { await worker?.stop(); },
     closePool: () => db.end(),
-    forceClose: () => server.closeAllConnections(),
+    forceClose: () => server?.closeAllConnections(),
     fail: () => process.exit(1),
     report: stage => console.error("Server shutdown failed", { stage }),
   });
   registerShutdownSignals(shutdown);
-  server.once("error", () => {
-    console.error("HTTP listener failed", { stage: "http_listen" });
-    void shutdown().catch(() => {});
+  try {
+    const workerEnabled = paymentExpiryWorkerEnabled();
+    if (workerEnabled) getPendingPaymentExpiryMinutes();
+    await startVerifiedRuntime({
+      verify: () => verifyDatabaseReadiness(db),
+      listen: () => new Promise<import("node:http").Server>((resolveListen, reject) => {
+        if (shuttingDown) { reject(new Error("Startup stopped.")); return; }
+        server = app.listen(PORT, () => resolveListen(server!));
+        server.once("error", reject);
+      }),
+      workerEnabled,
+      startWorker: async () => {
+        if (shuttingDown) throw new Error("Startup stopped.");
+        const initialized: ReturnType<typeof startPendingPaymentExpiryWorker> | Promise<ReturnType<typeof startPendingPaymentExpiryWorker>> = startPendingPaymentExpiryWorker();
+        // Current factory is synchronous: retain ownership immediately. Also
+        // await any future asynchronous initialization rather than losing rejection.
+        const activeWorker = initialized instanceof Promise ? await initialized : initialized;
+        if (!activeWorker || typeof activeWorker.stop !== "function") throw new Error("Worker initialization failed.");
+        worker = activeWorker;
+        if (shuttingDown) { await activeWorker.stop(); throw new Error("Startup stopped."); }
+      },
+      cleanup: shutdown,
+    });
+    if (shuttingDown) throw new Error("Startup stopped.");
+    starting = false;
+    console.log(`Fruits & Roots backend running at http://localhost:${PORT}`);
+    server!.once("error", () => {
+      console.error("HTTP listener failed", { stage: "http_listen" });
+      void shutdown().catch(() => {});
+    });
+  } catch {
+    // Also covers invalid configuration before the startup helper is entered.
+    await shutdown();
+    throw new Error("Backend startup failed.");
+  }
+}
+
+if (require.main === module) {
+  void startApplication().catch(async () => {
+    console.error("Backend startup refused; verify restricted database access and startup configuration.");
+    process.exitCode = 1;
   });
 }
