@@ -43,6 +43,7 @@ const quoteSchema = z.object({
 });
 
 const createOrderSchema = quoteSchema.extend({
+  paymentMethod: z.literal("PAY_AT_COUNTER").optional(),
   customerName: z.string().trim().min(2).max(80),
   customerPhone: z
     .string()
@@ -114,6 +115,7 @@ function hasDuplicateItems(items: OrderRequest["items"] | z.infer<typeof quoteSc
 }
 
 function getMerchantConfig() {
+  if (process.env.NODE_ENV === "production") return null;
   const upiId = process.env.MERCHANT_UPI_ID?.trim();
   const merchantName = process.env.MERCHANT_UPI_NAME?.trim();
   return upiId && merchantName ? { upiId, merchantName } : null;
@@ -479,6 +481,11 @@ router.post("/orders", limitOrders, async (req, res) => {
     return;
   }
   const input = parsed.data;
+  const counter = input.paymentMethod === "PAY_AT_COUNTER";
+  if (process.env.NODE_ENV === "production" && !counter) {
+    res.status(400).json({ message: "Pay at Counter is required for customer orders." });
+    return;
+  }
   const orderType =
     input.orderType ??
     (input.fulfillmentType === "TABLE" ? "DINE_IN" : "TAKEAWAY");
@@ -492,7 +499,7 @@ router.post("/orders", limitOrders, async (req, res) => {
     res.status(400).json({ message: "Each product size may only appear once." });
     return;
   }
-  if (!getMerchantConfig() && !razorpayTestEnabled()) {
+  if (!counter && !getMerchantConfig() && !razorpayTestEnabled()) {
     res.status(503).json({ message: "UPI payment is not configured." });
     return;
   }
@@ -514,6 +521,7 @@ router.post("/orders", limitOrders, async (req, res) => {
   if (input.orderType === "DINE_IN") {
     requestHashInput.orderType = orderType;
   }
+  if (counter) requestHashInput.paymentMethod = "PAY_AT_COUNTER";
   const requestHash = hash(JSON.stringify(requestHashInput));
   const trackingTokenHash = hash(trackingToken);
 
@@ -681,7 +689,7 @@ router.post("/orders", limitOrders, async (req, res) => {
           payment_status, order_status, idempotency_key, request_hash,
            tracking_token_hash, payment_expires_at)
        VALUES (
-          $1, $2, $3, $4, $5, $6, $7, 'PENDING_PAYMENT', 'PENDING_PAYMENT',
+          $1, $2, $3, $4, $5, $6, $7, '${counter ? "UNPAID" : "PENDING_PAYMENT"}', '${counter ? "PLACED" : "PENDING_PAYMENT"}',
           $8, $9, $10, NOW() + ($11::int * INTERVAL '1 minute')
        )
        ON CONFLICT (idempotency_key) DO NOTHING
@@ -758,7 +766,7 @@ router.post("/orders", limitOrders, async (req, res) => {
     await client.query(
       `INSERT INTO payments
          (order_id, transaction_reference, payment_status, payment_source)
-       VALUES ($1, NULL, 'PENDING_PAYMENT', 'MANUAL_UPI')`,
+       VALUES ($1, NULL, '${counter ? "UNPAID" : "PENDING_PAYMENT"}', '${counter ? "PAY_AT_COUNTER" : "MANUAL_UPI"}')`,
       [orderId],
     );
 
@@ -935,6 +943,7 @@ router.post(
 );
 
 router.post("/orders/:orderId/payment-claim", limitOrders, async (req, res) => {
+  if (process.env.NODE_ENV === "production") { res.status(404).json({ message: "Not found." }); return; }
   const orderId = z.string().uuid().safeParse(req.params.orderId);
   const parsedBody = z.object({
     transactionReference: z.string().trim().min(6).max(100)

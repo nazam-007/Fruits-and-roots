@@ -27,6 +27,7 @@ const orderStatusLabels: Record<OrderStatus, string> = {
 };
 
 const paymentStatusLabels: Record<PaymentStatus, string> = {
+  UNPAID: "Unpaid — Pay at Counter",
   PENDING_PAYMENT: "Payment Pending",
   PENDING_VERIFICATION: "Payment Pending Verification",
   PAID: "Paid",
@@ -290,6 +291,10 @@ export default function OrderTracking() {
         Back to menu
       </Link>
 
+      {order.paymentSource === "PAY_AT_COUNTER" && <p className="mb-5 rounded-xl border border-[#e7e4d8] bg-white p-4" role="status">
+        <strong>Order {order.orderNumber} · Pay at Counter</strong><br />
+        {isCancelled ? (isPaid ? "This paid order was cancelled. Check the refund status below." : "This order was cancelled. No payment is due.") : order.paymentStatus === "UNPAID" ? "Your order has been placed. Please pay staff at the café counter and quote your order number." : "Payment received at the counter."}
+      </p>}
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="mb-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#b56b36]">
@@ -365,7 +370,7 @@ export default function OrderTracking() {
                     ? " will announce your name when the order is ready for pickup."
                     : " will prepare your order for you to enjoy at the café."}
                 </>
-              ) : order.orderStatus === "READY"
+              ) : order.paymentSource === "PAY_AT_COUNTER" ? (isCancelled ? "Your order was cancelled." : order.paymentStatus === "UNPAID" ? "Please pay at the café counter. Staff will confirm receipt." : "Staff have recorded your counter payment.") : order.orderStatus === "READY"
                 ? orderType === "TAKEAWAY"
                   ? "Your order is ready! Please collect it from the counter."
                   : "Your order is ready to enjoy at the café."

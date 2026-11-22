@@ -36,7 +36,7 @@ function eligible(order: NonNullable<Awaited<ReturnType<typeof lockOrderPayment>
   if (orderPaid !== paymentPaid) throw new RefundError(409, "Payment records require reconciliation before cancellation.");
   if (!orderPaid || p.payment_source === "DEMO") return false;
   if (!p.verified_at || !p.verified_by || p.reconciliation_required !== false ||
-      !(p.payment_source === "MANUAL_UPI" ? p.verified_transaction_reference :
+      !(["MANUAL_UPI", "PAY_AT_COUNTER"].includes(p.payment_source) ? p.verified_transaction_reference :
         p.payment_source === "RAZORPAY_TEST" && p.razorpay_payment_id)) {
     throw new RefundError(409, "Trusted payment evidence requires review before cancellation.");
   }

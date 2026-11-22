@@ -16,13 +16,14 @@ export type OrderType = "TAKEAWAY" | "DINE_IN";
 
 export type PaymentStatus =
   | "PENDING_PAYMENT"
+  | "UNPAID"
   | "PENDING_VERIFICATION"
   | "PAID"
   | "REJECTED"
   | "CANCELLED"
   | "EXPIRED";
 
-export type PaymentSource = "DEMO" | "MANUAL_UPI" | "RAZORPAY_TEST" | null;
+export type PaymentSource = "DEMO" | "MANUAL_UPI" | "RAZORPAY_TEST" | "PAY_AT_COUNTER" | null;
 
 export type OrderLine = {
   productId: string;
@@ -129,6 +130,7 @@ export async function requestPaymentQuote(input: {
 
 export async function submitOrder(
   input: {
+    paymentMethod?: "PAY_AT_COUNTER";
     customerName: string;
     customerPhone?: string;
     orderType?: OrderType;

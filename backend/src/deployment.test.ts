@@ -11,6 +11,27 @@ import { frontendOrigins, trustedProxyIps, adminCookieSecurity, databaseHealthDi
 import { mountFrontend } from "./frontendHosting";
 import { expiryWorker, gracefulShutdown, registerShutdownSignals } from "./serverLifecycle";
 
+test("failed expiry timer allocation or unref leaves no queued database work", async (t) => {
+  let runs = 0;
+  const realSetInterval = globalThis.setInterval;
+  const failTimer = t.mock.method(globalThis, "setInterval", () => { throw Error("synthetic timer allocation failure"); });
+  assert.throws(() => expiryWorker(async () => { runs++; }, () => {}));
+  await Promise.resolve(); assert.equal(runs, 0);
+  failTimer.mock.restore();
+  let allocated: ReturnType<typeof setInterval> | undefined;
+  t.mock.method(globalThis, "setInterval", (...args: Parameters<typeof setInterval>) => {
+    const timer = Reflect.apply(realSetInterval, globalThis, args) as ReturnType<typeof setInterval>;
+    allocated = timer;
+    timer.unref = () => { throw Error("synthetic timer unref failure"); };
+    return timer;
+  });
+  try {
+    assert.throws(() => expiryWorker(async () => { runs++; }, () => {}, 5));
+    await new Promise(done => setTimeout(done, 20));
+    assert.equal(runs, 0);
+  } finally { if (allocated) clearInterval(allocated); }
+});
+
 test("production origins fail closed and admin cookies remain Strict/HttpOnly/Secure", () => {
   for (const origin of [undefined, "*", "http://cafe.example", "https://cafe.example/path", "https://user:password@cafe.example"]) {
     assert.throws(() => frontendOrigins({ NODE_ENV: "production", FRONTEND_ORIGIN: origin }));

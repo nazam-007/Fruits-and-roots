@@ -3,11 +3,13 @@ export function expiryWorker(run: () => Promise<unknown>, report: () => void, in
   let pending: Promise<void> | undefined;
   const tick = () => {
     if (stopped || pending) return;
-    pending = Promise.resolve().then(run).then(() => {}, report).finally(() => { pending = undefined; });
+    pending = Promise.resolve().then(() => stopped ? undefined : run()).then(() => {}, report).finally(() => { pending = undefined; });
   };
-  tick();
+  // Allocate the timer before queuing work. If allocation throws there must be
+  // no pending DB run whose stop handle could not be returned to the caller.
   const timer = setInterval(tick, intervalMs);
-  timer.unref();
+  try { timer.unref(); tick(); }
+  catch (error) { stopped = true; clearInterval(timer); throw error; }
   return { stop: async () => { stopped = true; clearInterval(timer); await pending; } };
 }
 

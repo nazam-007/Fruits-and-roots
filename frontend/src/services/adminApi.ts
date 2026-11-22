@@ -12,13 +12,14 @@ export type AdminOrderStatus =
   | "CANCELLED";
 export type AdminPaymentStatus =
   | "PENDING_PAYMENT"
+  | "UNPAID"
   | "PENDING_VERIFICATION"
   | "PAID"
   | "REJECTED"
   | "CANCELLED"
   | "EXPIRED";
 export type AdminOrderLifecycleStatus = AdminOrderStatus | "PENDING_PAYMENT";
-export type AdminPaymentSource = "DEMO" | "MANUAL_UPI" | "RAZORPAY_TEST" | null;
+export type AdminPaymentSource = "DEMO" | "MANUAL_UPI" | "RAZORPAY_TEST" | "PAY_AT_COUNTER" | null;
 
 export type AdminOrderRow = {
   refund_status?: "NONE" | "PENDING" | "COMPLETED" | null;
@@ -440,4 +441,10 @@ export function uploadAdminMenuImage(productId: string, dataUrl: string) {
     body: JSON.stringify({ dataUrl }),
     },
   );
+}
+
+export function recordCounterPayment(orderId: string) {
+  return request<{ orderId: string; paymentStatus: "PAID" }>(`/orders/${encodeURIComponent(orderId)}/counter-payment`, {
+    method: "POST", body: JSON.stringify({ received: true }),
+  });
 }

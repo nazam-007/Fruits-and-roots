@@ -360,7 +360,7 @@ router.get("/dashboard", async (_req, res) => {
                SELECT 1 FROM payments p
                WHERE p.order_id = o.id
                  AND p.payment_status = 'PAID'
-                 AND p.payment_source = 'MANUAL_UPI'
+                 AND p.payment_source IN ('MANUAL_UPI','PAY_AT_COUNTER')
                  AND p.verified_at IS NOT NULL
              )
          ), 0)::bigint AS verified_revenue_today,
@@ -594,6 +594,7 @@ router.get("/orders/:orderId", async (req, res) => {
        WHERE o.id = $1
          AND (
            o.payment_status = 'PAID'
+           OR (p.payment_source = 'PAY_AT_COUNTER' AND o.payment_status = 'UNPAID' AND p.payment_status = 'UNPAID')
            OR (p.payment_source = 'MANUAL_UPI' AND (
              p.payment_status = 'PENDING_VERIFICATION'
              OR o.payment_status = 'REJECTED'
@@ -640,7 +641,10 @@ router.patch("/orders/:orderId/status", async (req, res) => {
       res.status(404).json({ message: "Order not found." });
       return;
     }
-    if (order.payment_status !== "PAID") {
+    const counterReady = order.payment_source === "PAY_AT_COUNTER" &&
+      order.payment.payment_status === order.payment_status && order.payment.reconciliation_required === false &&
+      (order.payment_status === "UNPAID" || (order.payment_status === "PAID" && order.payment.verified_at && order.payment.verified_by));
+    if ((order.payment_source === "PAY_AT_COUNTER" && !counterReady) || (order.payment_status !== "PAID" && !counterReady)) {
       await client.query("ROLLBACK");
       res.status(409).json({
         message: "Payment must be verified before an order can be prepared.",
@@ -659,6 +663,7 @@ router.patch("/orders/:orderId/status", async (req, res) => {
     }
     if (parsedBody.data.status === "PREPARING") {
       const paidByAllowedSource =
+        counterReady ||
         order.payment_status === "PAID" &&
         (order.payment_source === "MANUAL_UPI" ||
           (order.payment_source === "DEMO" && isDemoMode()) ||
@@ -687,6 +692,38 @@ router.patch("/orders/:orderId/status", async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// Staff attests receipt at the counter. Uses the same lock order as cancellation/preparation.
+router.post("/orders/:orderId/counter-payment", async (req, res) => {
+  const id = z.string().uuid().safeParse(req.params.orderId);
+  if (!id.success || req.body?.received !== true) { res.status(400).json({ message: "Confirm that payment was received at the counter." }); return; }
+  let client: import("pg").PoolClient | undefined;
+  try {
+    client = await db.connect();
+    await client.query("BEGIN");
+    const order = await lockOrderPayment(client, id.data);
+    if (!order) { await client.query("ROLLBACK"); res.status(404).json({ message: "Order not found." }); return; }
+    const p = order.payment;
+    if (p.payment_source !== "PAY_AT_COUNTER" || order.order_status === "CANCELLED" || p.reconciliation_required !== false) {
+      await client.query("ROLLBACK"); res.status(409).json({ message: "This order cannot receive a counter payment." }); return;
+    }
+    if (order.payment_status === "PAID" && p.payment_status === "PAID" && p.verified_at && p.verified_by) {
+      await client.query("COMMIT"); res.json({ orderId: id.data, paymentStatus: "PAID" }); return;
+    }
+    if (order.payment_status !== "UNPAID" || p.payment_status !== "UNPAID") {
+      await client.query("ROLLBACK"); res.status(409).json({ message: "Payment records require review." }); return;
+    }
+    await client.query(`UPDATE payments SET payment_status='PAID',verified_at=NOW(),verified_by=$2,
+      verified_transaction_reference=$3 WHERE order_id=$1`, [id.data, res.locals.adminId, `COUNTER-${id.data}`]);
+    await client.query("UPDATE orders SET payment_status='PAID', paid_at=NOW() WHERE id=$1", [id.data]);
+    await client.query("COMMIT");
+    publishOrderStatus(id.data, order.order_status);
+    res.json({ orderId: id.data, paymentStatus: "PAID" });
+  } catch {
+    try { await client?.query("ROLLBACK"); } catch { /* Preserve safe response. */ }
+    res.status(503).json({ message: "Unable to record counter payment. Refresh before retrying." });
+  } finally { client?.release(); }
 });
 
 // Mounted after router.use(requireAdmin); no customer claim can complete a refund.

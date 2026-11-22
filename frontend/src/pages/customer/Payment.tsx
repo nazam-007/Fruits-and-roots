@@ -81,6 +81,10 @@ export default function Payment() {
     }
   }, [order?.paymentStatus]);
 
+  useEffect(() => {
+    if (order?.paymentSource === "PAY_AT_COUNTER") navigate(`/order/${order.orderId}`, { replace: true });
+  }, [order?.paymentSource, order?.orderId, navigate]);
+
   const handleCancelPayment = async () => {
     if (submittingRef.current || !orderId || !trackingToken) return;
     submittingRef.current = true;
